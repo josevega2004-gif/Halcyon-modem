@@ -1,0 +1,44 @@
+.TH HALCYON 1 "November 2026" "halcyon 0.1.0" "User Commands"
+.SH NAME
+halcyon \- open HF data modem console
+.SH SYNOPSIS
+.B halcyon
+[\fB\-\-host\fR \fIADDR\fR] [\fB\-\-port\fR \fIPORT\fR]
+.SH DESCRIPTION
+.B halcyon
+starts the Halcyon modem console: a small HTTP server that serves the browser
+user interface and its JSON control API.  The page shows the waterfall, the
+speed ladder, the received frames and the transcript, and from it you connect
+a radio, pick a speed level and send traffic.
+.PP
+The server binds to the loopback interface by default.  It has no
+authentication, so do not bind it to a public or shared interface.
+.PP
+Radio access is provided by one of four transports: the Hermes Lite 2
+protocol, TCI, CAT through Hamlib's
+.BR rigctld (1),
+or the simulated channel used by the bench console.  Connecting a radio does
+not transmit: the transmit path stays disarmed until you arm it in the panel.
+.SH OPTIONS
+.TP
+.BR \-\-host " \fIADDR\fR"
+Address to bind.  Defaults to 127.0.0.1.
+.TP
+.BR \-\-port " \fIPORT\fR"
+TCP port to listen on.  Defaults to 8730.
+.SH FILES
+.TP
+.I /usr/lib/python3/dist-packages/halcyon
+The modem, the link layer, the radio clients and the web interface.
+.TP
+.I /usr/bin/halcyon-modem
+The C++17 modem core, for encoding and decoding frames from a script.
+.SH EXAMPLES
+.TP
+.B halcyon --port 8730
+Serve the console at http://127.0.0.1:8730/ .
+.SH SEE ALSO
+.BR halcyon-modem (1),
+.BR rigctld (1)
+.SH AUTHOR
+The Halcyon authors.

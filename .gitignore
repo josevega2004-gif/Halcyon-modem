@@ -1,0 +1,18 @@
+# build outputs
+build/
+dist/
+*.deb
+*.egg-info/
+__pycache__/
+*.py[cod]
+.pytest_cache/
+*.o
+cpp/build/
+
+# private cross toolchain fetched by tools/get_cross_toolchain.sh (~400 MB)
+.toolchain/
+
+# editor / OS noise
+.DS_Store
+*.swp
+

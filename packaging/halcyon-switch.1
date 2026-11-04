@@ -1,0 +1,118 @@
+.TH HALCYON-SWITCH 1 "November 2026" "Halcyon 0.1" "User Commands"
+.SH NAME
+halcyon-switch \- select Halcyon in PAT or VarAC, or restore the previous modem
+.SH SYNOPSIS
+.B halcyon-switch
+[\fB\-\-config\fR \fIFILE\fR]
+.RI { status | on | off | varac | use " NAME" | list | host }
+.SH DESCRIPTION
+PAT and VarAC reach a modem over two loopback TCP ports, 8300 for commands and
+8301 for data.  In PAT's configuration file the transport that carries the
+Winlink packet protocol over those ports is called \fBvarahf\fR.
+.B halcyon-switch
+writes that block for Halcyon, saves the value that was there before, and can
+start or stop the host service for you.  VarAC keeps its connection settings in
+its own interface, so for VarAC the tool starts the host, asks it to identify
+itself and prints the values to enter there.
+.PP
+The first switch copies the PAT configuration to
+\fIconfig.json\fR\fB.halcyon\-backup\fR and records the previous transport in
+\fIconfig.json\fR\fB.halcyon\-state.json\fR.  Running \fBon\fR again keeps the
+first recorded value, and \fBoff\fR puts that value back.
+.SH OPTIONS
+.TP
+.BR \-\-config " " \fIFILE\fR
+PAT configuration to edit.  Defaults to
+\fI$XDG_CONFIG_HOME/pat/config.json\fR, or \fI~/.config/pat/config.json\fR.
+The environment variable \fBHALCYON_PAT_CONFIG\fR overrides the default.
+.SH COMMANDS
+.TP
+.B status
+Show the transport block PAT currently holds, whether it points at Halcyon,
+whether the host is running, and where the backup and log live.
+.TP
+.BI on
+Write the \fBvarahf\fR block, then start the host service on 127.0.0.1:8300
+and 127.0.0.1:8301 unless \fB\-\-no\-host\fR is given.
+.TP
+.B off
+Stop the host service started by this tool and restore the previous transport
+block.  With \fB\-\-keep\-host\fR the service is left running.
+.TP
+.BI varac
+Start the host service if needed, send \fBVERSION\fR to the command port, and
+print the address, port and bandwidth to use in VarAC's modem settings.  Exits
+non-zero when nothing answers.  PAT's configuration is not touched.
+.TP
+.BI use " " \fINAME\fR
+Apply a named profile from \fI~/.config/halcyon/modems.json\fR.  The built-in
+\fBhalcyon\fR profile is always available and can be overridden by that file.
+.TP
+.B list
+Print the available profiles.
+.TP
+.B host
+Run the host service in the foreground; the same as \fBhalcyon-host\fR.
+.SH "ON AND VARAC OPTIONS"
+.TP
+.BR \-\-mycall " " \fICALL\fR
+Callsign reported to the client.  Default \fBN0CALL\fR.
+.TP
+.BR \-\-bandwidth " " \fI500|2300|2750\fR
+Bandwidth advertised to the client.  Default \fB2300\fR.
+.TP
+.BR \-\-addr " " \fIHOST:PORT\fR
+Address written into the PAT configuration (\fBon\fR only).  Default
+\fB127.0.0.1:8300\fR.
+.TP
+.BR \-\-host " " \fIADDRESS\fR
+Address the host service binds.  Default \fB127.0.0.1\fR.
+.TP
+.BR \-\-cmd\-port " " \fIPORT\fR
+Command port.  Default \fB8300\fR.
+.TP
+.BR \-\-data\-port " " \fIPORT\fR
+Data port.  Default \fB8301\fR.
+.TP
+.B \-\-no\-host
+Do not start anything; \fBon\fR only edits the PAT configuration and \fBvarac\fR
+only checks the running service.
+.TP
+.B \-\-dry\-run
+Print what would change without writing anything (\fBon\fR and \fBoff\fR).
+.SH FILES
+.TP
+.I ~/.config/pat/config.json
+PAT configuration.
+.TP
+.I ~/.config/halcyon/modems.json
+Optional profile definitions, mapping a name to a transport and its settings.
+.TP
+.I ~/.cache/halcyon/host.log
+Output of a host service started by \fBon\fR or \fBvarac\fR.
+.SH EXAMPLES
+Select Halcyon for PAT, then dial a gateway:
+.PP
+.nf
+.RS
+halcyon-switch on --mycall N0CALL
+pat connect varahf:///N0CALL
+halcyon-switch off
+.RE
+.fi
+.PP
+Start the modem for VarAC and print what to enter there:
+.PP
+.nf
+.RS
+halcyon-switch varac --mycall N0CALL
+.RE
+.fi
+.SH "SEE ALSO"
+.BR halcyon (1),
+.BR halcyon-host (1),
+.BR pat (1)
+.PP
+Setup guides installed with the package:
+\fI/usr/share/doc/halcyon/PAT.md\fR and
+\fI/usr/share/doc/halcyon/VARAC.md\fR.

@@ -1,0 +1,1243 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Halcyon — HF terminal</title>
+<style>
+  :root{
+    --bg:#05080c; --panel:#0b1118; --panel2:#0e1620; --line:#192430; --line2:#22303d;
+    --ink:#d7e3ee; --dim:#7c8c9c; --faint:#4d5d6b;
+    --rx:#46d69c; --tx:#f0a93a; --red:#ff6f6f; --blue:#5fb6e8;
+    --mono: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  }
+  *{box-sizing:border-box}
+  html,body{height:100%}
+  body{margin:0;background:var(--bg);color:var(--ink);overflow:hidden;
+    font:13.5px/1.45 ui-sans-serif,system-ui,-apple-system,"Segoe UI",Roboto,sans-serif}
+  .win{height:100vh;display:grid;grid-template-rows:auto 1fr auto}
+
+  /* ---------------------------------------------------------------- title bar */
+  .title{display:flex;align-items:center;gap:10px;padding:8px 12px;flex-wrap:wrap;row-gap:6px;
+    border-bottom:1px solid var(--line);background:linear-gradient(180deg,#0e1721,#080d13)}
+  .logo{display:flex;align-items:center;gap:9px}
+  .logo .m{width:26px;height:26px;border-radius:6px;display:grid;place-items:center;
+    background:linear-gradient(160deg,#1d5a4c,#0d3129);border:1px solid #2a6f5e;color:#9ff5da;font-size:13px}
+  .logo b{font-size:12.5px;letter-spacing:.2em;font-weight:600}
+  .logo i{font-style:normal;font-size:9.5px;letter-spacing:.16em;color:var(--faint);display:block;margin-top:1px}
+  .dial{display:flex;align-items:baseline;gap:8px;margin-left:8px;padding:3px 10px;border:1px solid var(--line);
+    border-radius:6px;background:#070c11}
+  .dial b{font-family:var(--mono);font-size:13px;letter-spacing:.06em;color:#bfe4ff}
+  .dial span{font-family:var(--mono);font-size:9.5px;color:var(--faint);letter-spacing:.1em}
+  .topright{margin-left:auto;display:flex;align-items:center;gap:14px}
+  .lamp{display:flex;align-items:center;gap:6px;font-family:var(--mono);font-size:10px;
+    letter-spacing:.12em;color:var(--dim)}
+  .lamp s{width:8px;height:8px;border-radius:50%;background:var(--rx);box-shadow:0 0 7px rgba(70,214,156,.8);
+    text-decoration:none}
+  .lamp.tx s{background:var(--tx);box-shadow:0 0 8px rgba(240,169,58,.9)}
+  .lamp.tx{color:var(--tx)}
+  .topright a{font-size:11px;color:var(--dim);text-decoration:none;border:1px solid var(--line);
+    border-radius:5px;padding:4px 8px}
+  .topright a:hover{color:var(--ink);border-color:var(--line2)}
+  .sim{font-family:var(--mono);font-size:9.5px;letter-spacing:.1em;color:#f0a93a;
+    border:1px solid #3d2f16;background:#181206;border-radius:4px;padding:3px 7px}
+
+  /* -------------------------------------------------------------------- body */
+  .body{display:grid;grid-template-columns:292px minmax(0,1fr);min-height:0}
+  aside{border-right:1px solid var(--line);background:var(--panel);overflow:auto;
+    display:flex;flex-direction:column}
+  .blk{border-bottom:1px solid var(--line);padding:10px 11px 12px}
+  .blk h3{margin:0 0 8px;font-size:9.5px;letter-spacing:.17em;text-transform:uppercase;color:var(--faint);
+    font-weight:600;display:flex;justify-content:space-between;align-items:baseline}
+  .blk h3 em{font-style:normal;font-family:var(--mono);letter-spacing:0;text-transform:none;color:var(--dim);font-size:10px}
+
+  .bw{display:flex;gap:4px}
+  .bw button{flex:1;background:#070d13;border:1px solid var(--line);color:var(--dim);border-radius:5px;
+    padding:5px 0;font-family:var(--mono);font-size:10.5px;cursor:pointer}
+  .bw button.on{background:#122029;border-color:#2b5c53;color:var(--rx)}
+
+  .levels{display:flex;flex-direction:column;gap:1px;max-height:238px;overflow:auto}
+  .lv{display:grid;grid-template-columns:22px 1fr auto;gap:7px;align-items:center;
+    padding:3px 6px;border-radius:4px;cursor:pointer;border:1px solid transparent;font-size:11.5px}
+  .lv:hover{background:#101a23}
+  .lv.on{background:rgba(70,214,156,.08);border-color:rgba(70,214,156,.35)}
+  .lv .n{font-family:var(--mono);font-size:9.5px;color:var(--faint)}
+  .lv .t{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+  .lv .r{font-family:var(--mono);font-size:10px;color:var(--dim)}
+  .lv.on .r{color:var(--rx)}
+  .row{display:flex;align-items:center;gap:8px;margin-top:8px}
+  .row:first-child{margin-top:0}
+  .row label{font-size:10.5px;letter-spacing:.05em;color:var(--dim);min-width:52px}
+  .row output{font-family:var(--mono);font-size:11px;color:var(--ink);min-width:56px;text-align:right}
+  input[type=range]{-webkit-appearance:none;appearance:none;flex:1;height:3px;border-radius:2px;background:#1c2733}
+  input[type=range]::-webkit-slider-thumb{-webkit-appearance:none;width:12px;height:12px;border-radius:50%;
+    background:var(--rx);border:2px solid #070c11;cursor:pointer}
+  input[type=range]::-moz-range-thumb{width:10px;height:10px;border-radius:50%;background:var(--rx);border:2px solid #070c11}
+  .sel{flex:1;background:#070d13;border:1px solid var(--line);color:var(--ink);border-radius:5px;
+    padding:4px 6px;font:inherit;font-size:11px}
+  .chk{display:flex;align-items:center;gap:6px;font-size:11px;color:var(--dim);cursor:pointer;margin-top:8px}
+  .chk input{accent-color:var(--rx)}
+
+  .meter{margin-top:9px}
+  .meter .bar{height:9px;border-radius:2px;background:#0a1219;border:1px solid var(--line);overflow:hidden;
+    display:flex;gap:1px;padding:1px}
+  .meter .bar i{flex:1;background:#16202a;border-radius:1px}
+  .meter .bar i.on{background:linear-gradient(180deg,#6ff0c0,#2aa47a)}
+  .meter .bar i.hot.on{background:linear-gradient(180deg,#ffd27a,#e0912c)}
+  .meter .cap{display:flex;justify-content:space-between;font-family:var(--mono);font-size:9px;
+    color:var(--faint);margin-top:4px}
+
+  /* --------------------------------------------------------- waterfall + log */
+  .main{display:grid;grid-template-rows:auto minmax(0,1fr) auto;min-height:0;background:var(--bg)}
+  .scope{border-bottom:1px solid var(--line);padding:8px 10px 6px;background:linear-gradient(180deg,#070c11,#05080c)}
+  #wfall{display:block;width:100%;height:176px;border:1px solid var(--line);border-radius:4px;background:#04070a;
+    image-rendering:pixelated}
+  .axis{display:flex;justify-content:space-between;font-family:var(--mono);font-size:9px;color:var(--faint);
+    padding:4px 2px 0;letter-spacing:.04em}
+  .axis span.ctr{color:var(--dim)}
+
+  .log{overflow-y:auto;padding:12px 14px;display:flex;flex-direction:column;gap:9px;min-height:0}
+  .msg{border:1px solid var(--line);border-radius:7px;padding:7px 10px;max-width:80%;background:#0a1017;
+    animation:in .18s ease-out}
+  @keyframes in{from{opacity:0;transform:translateY(4px)}to{opacity:1;transform:none}}
+  .msg .m{display:flex;gap:9px;font-family:var(--mono);font-size:9px;letter-spacing:.08em;color:var(--faint);
+    margin-bottom:3px;text-transform:uppercase}
+  .msg .m b{font-weight:500}
+  .msg p{margin:0;white-space:pre-wrap;word-break:break-word}
+  .msg.rx{border-left:2px solid var(--rx);align-self:flex-start}
+  .msg.rx .m b{color:var(--rx)}
+  .msg.tx{border-right:2px solid var(--tx);align-self:flex-end;background:#12100a}
+  .msg.tx .m b{color:var(--tx)}
+  .msg.tx .m{justify-content:flex-end}
+  .note{align-self:center;font-family:var(--mono);font-size:10px;color:var(--faint);letter-spacing:.04em;
+    text-align:center;max-width:90%}
+  .note.bad{color:#ff9d9d}
+  .note.warn{color:#f3c178}
+
+  .compose{display:flex;gap:8px;align-items:center;padding:10px 12px;border-top:1px solid var(--line);
+    background:var(--panel2)}
+  .compose input{flex:1;background:#060b10;border:1px solid var(--line2);border-radius:6px;color:var(--ink);
+    padding:8px 10px;font:inherit;font-size:12.5px;outline:none}
+  .compose input:focus{border-color:#2b5c53;box-shadow:0 0 0 3px rgba(70,214,156,.07)}
+  .compose button{border:1px solid #2b5c53;background:linear-gradient(180deg,#175243,#103a31);color:#d6fff1;
+    border-radius:6px;padding:8px 15px;font:inherit;font-size:12px;font-weight:600;cursor:pointer;
+    display:flex;align-items:center;gap:7px}
+  .compose button:hover{background:linear-gradient(180deg,#1c6453,#12463b)}
+  .compose button:disabled{opacity:.5;cursor:progress}
+  .lvchip{font-family:var(--mono);font-size:9.5px;color:var(--dim);border:1px solid var(--line);
+    border-radius:4px;padding:4px 7px;white-space:nowrap}
+
+  /* ------------------------------------------------------------------ status */
+  .status{display:flex;align-items:center;gap:18px;flex-wrap:wrap;padding:5px 14px;border-top:1px solid var(--line);
+    background:#070c11;font-family:var(--mono);font-size:10px;color:var(--faint);letter-spacing:.03em}
+  .status b{color:var(--dim);font-weight:500}
+  .status .right{margin-left:auto;display:flex;gap:16px}
+  .spin{width:11px;height:11px;border-radius:50%;border:2px solid rgba(255,255,255,.2);
+    border-top-color:#d6fff1;animation:sp .7s linear infinite}
+  @keyframes sp{to{transform:rotate(360deg)}}
+  /* ------------------------------------------------------- calls & services */
+  .callbar{display:flex;align-items:center;gap:6px;margin-left:4px;padding-left:8px;min-width:0;
+    border-left:1px solid var(--line)}
+  .callbar label{display:flex;flex-direction:column;gap:1px;font-family:var(--mono);font-size:8.5px;
+    letter-spacing:.12em;color:var(--faint)}
+  .callbar input.call{width:74px;background:#060b10;border:1px solid var(--line);border-radius:4px;
+    color:var(--ink);font-family:var(--mono);font-size:11.5px;letter-spacing:.06em;padding:2px 5px;outline:none}
+  .callbar input.call:focus{border-color:#2b5c53}
+  .conn{background:linear-gradient(180deg,#175243,#103a31);border-color:#2b5c53;color:#d6fff1;
+    font-weight:600;letter-spacing:.06em;padding:5px 12px}
+  .abort{color:#ff9d9d;border-color:#3d2020;padding:5px 9px}
+  .svclog{font-family:var(--mono);font-size:8.5px;color:var(--faint);white-space:pre-line;
+    margin-top:5px;line-height:1.45;max-height:62px;overflow:hidden}
+  .svcstate{font-family:var(--mono);font-size:9.5px;color:var(--dim);white-space:pre-line;line-height:1.5}
+  .bwrow{display:flex;gap:4px;margin-top:6px}
+  .bwrow button{flex:1;background:#070d13;border:1px solid var(--line);color:var(--dim);border-radius:4px;
+    padding:3px 0;font-family:var(--mono);font-size:9.5px;cursor:pointer}
+  .bwrow button:hover{color:var(--ink);border-color:var(--line2)}
+  code{font-family:var(--mono);font-size:9px;color:var(--dim);background:#0a1219;
+    border:1px solid var(--line);border-radius:3px;padding:0 3px}
+
+  /* ---------------------------------------------------------------- radio */
+  .dot{display:inline-block;width:7px;height:7px;border-radius:50%;background:#3a4653;vertical-align:middle}
+  .dot.on{background:var(--rx);box-shadow:0 0 7px rgba(70,214,156,.8)}
+  .radstate{font-family:var(--mono);font-size:9.5px;color:var(--dim);line-height:1.5;margin-bottom:6px;
+    white-space:pre-line}
+  .radrow{display:flex;gap:4px;margin-top:5px}
+  .ipt{flex:1;min-width:0;background:#060b10;border:1px solid var(--line);border-radius:4px;color:var(--ink);
+    font-family:var(--mono);font-size:10.5px;padding:3px 6px;outline:none}
+  .ipt:focus{border-color:#2b5c53}
+  .minibt{background:#0a1219;border:1px solid var(--line);color:var(--dim);border-radius:4px;padding:3px 8px;
+    font:inherit;font-size:10.5px;cursor:pointer;white-space:nowrap}
+  .minibt:hover{color:var(--ink);border-color:var(--line2)}
+  .minibt:disabled{opacity:.4;cursor:not-allowed}
+  .minibt.wide{flex:1}
+  .minibt.on{color:#d6fff1;border-color:#2b5c53;background:#103a31}
+  .radgrid{display:grid;grid-template-columns:34px 1fr;gap:3px 6px;align-items:center;margin-top:6px}
+  .radgrid label{font-family:var(--mono);font-size:9px;color:var(--faint);letter-spacing:.06em}
+  .found{display:block;width:100%;text-align:left;margin-top:4px;background:#0a1219;border:1px solid var(--line);
+    border-radius:4px;padding:4px 6px;cursor:pointer;color:var(--ink);font:inherit}
+  .found:hover{border-color:#2b5c53}
+  .found b{font-size:10.5px;display:block}
+  .found span,.found em{font-family:var(--mono);font-size:9px;color:var(--faint);font-style:normal;display:block}
+  .hint{font-family:var(--mono);font-size:9px;color:var(--faint);margin-top:5px;line-height:1.45}
+  .hint.warn{color:#f3c178}
+  .seg{display:flex;gap:4px;margin-top:6px}
+  .seg button{flex:1;background:#070d13;border:1px solid var(--line);color:var(--dim);border-radius:4px;
+    padding:4px 0;font:inherit;font-size:10px;cursor:pointer}
+  .seg button.on{color:#d6fff1;border-color:#2b5c53;background:#103a31}
+  .seg button:disabled{opacity:.35;cursor:not-allowed}
+  .sim.on{color:#9ff5da;border-color:#2a6f5e;background:#0a2a22}
+  @media (max-width:820px){ .body{grid-template-columns:1fr} aside{display:none} }
+/* [data-dev] marks the instruments that are hidden unless the config file
+   turns them on; see halcyon/config.py. */
+[hidden] { display: none !important; }
+</style>
+</head>
+<body>
+<div class="win">
+
+  <div class="title">
+    <div class="logo"><div class="m">◈</div><div><b>HALCYON</b><i>HF DATA TERMINAL</i></div></div>
+    <div class="callbar">
+      <label>MYCALL<input class="call" id="myCall" value="N0CALL" spellcheck="false"></label>
+      <label>TO<input class="call" id="toCall" value="" spellcheck="false" placeholder="—"></label>
+      <button class="minibt conn" id="btnConnect">CONNECT</button>
+      <button class="minibt abort" id="btnAbort">ABORT</button>
+    </div>
+    <div class="dial"><b id="dial">14.105.000</b><span>MHz USB</span></div>
+    <div class="topright">
+      <span class="sim" id="linkBadge">SIMULATED IONOSPHERE</span>
+      <div class="lamp" id="lamp"><s></s><span id="lampTxt">READY</span></div>
+      <a href="/console" data-dev>lab console →</a>
+    </div>
+  </div>
+
+  <div class="body">
+    <aside>
+      <div class="blk">
+        <h3>Radio <em><span class="dot" id="radLed"></span></em></h3>
+        <div class="radstate" id="radState">no radio — broadcast a discovery or type an address</div>
+        <div class="radrow">
+          <input class="ipt" id="radIp" value="192.168.1.40" spellcheck="false">
+          <button class="minibt" id="radFind">Find</button>
+        </div>
+        <div id="radList"></div>
+        <div class="radgrid">
+          <label>MHz</label><input class="ipt" id="radFreq" value="14.105000" spellcheck="false">
+          <label>Rate</label>
+          <select class="sel" id="radRate">
+            <option value="48000" selected>48 kHz</option>
+            <option value="96000">96 kHz</option>
+            <option value="192000">192 kHz</option>
+          </select>
+          <label>LNA</label><input class="ipt" id="radLna" type="number" min="-12" max="48" step="1" value="16">
+          <label>Drive</label><input class="ipt" id="radDrive" type="number" min="0" max="15" step="1" value="8">
+        </div>
+        <div class="radrow">
+          <button class="minibt wide" id="radConnect">Connect</button>
+          <button class="minibt" id="radPtt">PTT</button>
+        </div>
+        <div class="radrow">
+          <button class="minibt wide" id="radListen">Listen &amp; decode 3 s</button>
+        </div>
+        <div class="seg" id="radMode">
+          <button data-mode="sim" class="on">Simulated</button>
+          <button data-mode="air">On air</button>
+        </div>
+        <div class="hint">Hermes Lite 2 · HPSDR protocol 1 · UDP 1024</div>
+      </div>
+
+      <div class="blk">
+        <h3>Services <em id="svcNote">off</em></h3>
+        <div class="radrow">
+          <button class="minibt wide" id="svcStart">Start modem host</button>
+        </div>
+        <div class="svcstate" id="svcState">modem host off — PAT and VarAC have nothing to attach to</div>
+        <div class="bwrow">
+          <button data-bw="500">BW500</button>
+          <button data-bw="2300">BW2300</button>
+          <button data-bw="2750">BW2750</button>
+        </div>
+        <div class="svclog" id="svcLog"></div>
+        <div class="hint">PAT: <code>pat connect varahf:///CALL</code><br>VarAC: modem <code>localhost:8300</code></div>
+        <div class="radgrid">
+          <label>TCI</label><input class="ipt" id="tciUrl" value="ws://127.0.0.1:50001" spellcheck="false">
+        </div>
+        <div class="radrow">
+          <button class="minibt wide" id="tciConnect">Connect TCI</button>
+          <button class="minibt" id="tciPtt">PTT</button>
+        </div>
+        <div class="svcstate" id="tciState">no TCI session</div>
+      </div>
+
+      <div class="blk">
+        <h3>CAT <em id="catNote">hamlib</em></h3>
+        <div class="radgrid">
+          <label>Rig</label><input class="ipt" id="catQuery" placeholder="search 320 rigs" spellcheck="false">
+        </div>
+        <select class="sel" id="catModel" style="width:100%"></select>
+        <div class="radgrid">
+          <label>Port</label><input class="ipt" id="catDevice" placeholder="/dev/ttyUSB0" spellcheck="false">
+          <label>Baud</label>
+          <select class="sel" id="catBaud">
+            <option>4800</option><option>9600</option><option selected>19200</option>
+            <option>38400</option><option>57600</option><option>115200</option>
+          </select>
+        </div>
+        <label class="chk"><input type="checkbox" id="catManage" checked> start rigctld for me</label>
+        <div class="radgrid">
+          <label>Host</label><input class="ipt" id="catHost" value="127.0.0.1:4532" spellcheck="false">
+        </div>
+        <div class="radrow">
+          <button class="minibt wide" id="catConnect">Connect CAT</button>
+          <button class="minibt" id="catPtt">PTT</button>
+        </div>
+        <div class="radgrid">
+          <label>MHz</label><input class="ipt" id="catFreq" value="14.074000" spellcheck="false">
+          <label>Mode</label>
+          <select class="sel" id="catMode2">
+            <option>USB</option><option>LSB</option><option>CWU</option><option>CWL</option>
+            <option>AM</option><option>FM</option><option>DIGU</option><option>DIGL</option>
+          </select>
+        </div>
+        <div class="radrow"><button class="minibt wide" id="catApply">Set VFO &amp; mode</button></div>
+        <div class="radgrid">
+          <label>Raw</label><input class="ipt" id="catRaw" placeholder="S 1 VFOB · J 150 · L AF 0.4" spellcheck="false">
+        </div>
+        <div class="radrow"><button class="minibt wide" id="catSend">Send rigctld command</button></div>
+        <div class="svcstate" id="catState">no CAT session</div>
+      </div>
+
+      <div class="blk">
+        <h3>Bandwidth <em id="bwNote">2750 Hz</em></h3>
+        <div class="bw" id="bw"></div>
+      </div>
+
+      <div class="blk" style="flex:1;min-height:0;display:flex;flex-direction:column">
+        <h3>Speed level <em id="lvlNote">auto</em></h3>
+        <div class="levels" id="levels"></div>
+        <label class="chk"><input type="checkbox" id="auto" checked> follow the channel</label>
+      </div>
+
+      <div class="blk" data-dev>
+        <h3>Propagation <em id="pathNote">AWGN</em></h3>
+        <div class="row">
+          <label for="snr">S/N</label>
+          <input type="range" id="snr" min="-12" max="26" step="0.5" value="9">
+          <output id="snrOut">+9.0</output>
+        </div>
+        <div class="row">
+          <label>Path</label>
+          <select class="sel" id="path">
+            <option value="awgn">AWGN</option>
+            <option value="good">Good fading</option>
+            <option value="moderate">Moderate fading</option>
+            <option value="poor">Poor fading</option>
+          </select>
+        </div>
+        <label class="chk"><input type="checkbox" id="qsb" checked> QSB — fade each burst ±1.5 dB</label>
+      </div>
+
+      <div class="blk">
+        <h3>S-meter <em id="sUnit">S9</em></h3>
+        <div class="meter">
+          <div class="bar" id="sbar"></div>
+          <div class="cap"><span>−12</span><span>0</span><span>+14</span><span>+26 dB</span></div>
+        </div>
+      </div>
+    </aside>
+
+    <div class="main">
+      <div class="scope">
+        <canvas id="wfall"></canvas>
+        <div class="axis">
+          <span>−1.6 kHz</span><span>−0.8</span><span class="ctr">carrier</span>
+          <span>+0.8</span><span>+1.6 kHz</span>
+        </div>
+      </div>
+      <div class="log" id="log"></div>
+      <div class="compose">
+        <span class="lvchip" id="lvchip">L04</span>
+        <input id="input" placeholder="Message — Enter to transmit through the simulated channel" autocomplete="off">
+        <button id="send">Send</button>
+      </div>
+    </div>
+  </div>
+
+  <div class="status">
+    <span>LEVEL <b id="stLvl">L04</b></span>
+    <span>MODE <b id="stMode">—</b></span>
+    <span>RATE <b id="stRate">—</b></span>
+    <span>S/N <b id="stSnr">—</b></span>
+    <span>BURST <b id="stBurst">—</b></span>
+    <span>AIRTIME <b id="stAir">—</b></span>
+    <div class="right">
+      <span>no transmitter keyed · receive-side only</span>
+    </div>
+  </div>
+</div>
+
+<script>
+const $ = (s, r = document) => r.querySelector(s);
+const $$ = (s, r = document) => [...r.querySelectorAll(s)];
+const S = {
+  profiles: [], profile: 'wide', level: 4, snr: 9, qsb: true, auto: true,
+  path: 'awgn', busy: false, lastDb: null
+};
+
+/* The single-file build carries a bundle of bursts measured by the Python modem
+   and answers these two calls from it; served from the console they stay fetches. */
+const BUNDLE = window.HALCYON_BUNDLE || null;
+
+async function apiGet(path) {
+  if (BUNDLE) return BUNDLE.modes;
+  return fetch(path).then(r => r.json());
+}
+
+async function apiPost(path, body) {
+  if (!BUNDLE) {
+    return fetch(path, {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(body)
+    }).then(r => r.json());
+  }
+  if (path !== '/api/decode') return { error: 'the single-file build has no radio' };
+  const levels = (BUNDLE.bursts || {})[body.profile] || {};
+  const points = levels[String(body.mcs)] || [];
+  if (!points.length) return { error: 'no recorded burst for this level' };
+  let near = points[0];
+  for (const p of points) {
+    if (Math.abs(p.snr - body.snr) < Math.abs(near.snr - body.snr)) near = p;
+  }
+  const run = near.runs[body.text] || near.runs[Object.keys(near.runs)[0]];
+  return {
+    profile: body.profile, channel: 'awgn', snr: near.snr, offline: true,
+    sent: run.sent, timing: run.timing, attempts: [run.attempt],
+    elapsed_s: run.elapsed_s, waterfall: run.waterfall
+  };
+}
+const BAND = [
+  { id: 'wide', label: '2750', hz: 2750, name: 'Wide' },
+  { id: 'robust', label: '562', hz: 562, name: 'Robust' },
+  { id: 'compact', label: '492', hz: 492, name: 'Compact' },
+];
+const fmt = v => (v >= 0 ? '+' : '') + v.toFixed(1);
+const esc = s => String(s).replace(/[&<>]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;' }[c]));
+const now = () => new Date().toTimeString().slice(0, 8);
+
+/* --------------------------------------------------------------- HL2 radio */
+const R = { connected: false, info: null, air: true, poll: null, busy: false };
+
+function radioPost(path, body) {
+  return fetch(path, {
+    method: 'POST', headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(body || {})
+  }).then(r => r.json());
+}
+
+async function radioStatus() {
+  if (BUNDLE) return;  // no sockets in a file opened from disk
+  try {
+    const st = await fetch('/api/radio').then(r => r.json());
+    R.connected = !!st.connected;
+    R.info = st.connected ? st : null;
+  } catch (e) { R.connected = false; R.info = null; }
+  renderRadio();
+}
+
+function renderRadio() {
+  const led = $('#radLed');
+  if (led) led.className = 'dot' + (R.connected ? ' on' : '');
+  const txt = $('#radState');
+  if (txt) {
+    txt.textContent = R.connected
+      ? `${R.info.board || 'HL2'} · fw ${R.info.firmware || '?'} · ${R.info.mac || 'no mac'}\n` +
+        `${(R.info.freq_hz / 1e6).toFixed(6)} MHz · ${Math.round(R.info.rate / 1000)} kHz · LNA ${R.info.lna_db} dB`
+      : (BUNDLE ? 'single-file build: a browser has no UDP sockets\nuse the served terminal for the HL2'
+                : 'no radio — broadcast a discovery or type an address');
+  }
+  const badge = $('#linkBadge');
+  if (badge) {
+    badge.textContent = BUNDLE ? 'STANDALONE FILE'
+      : (R.connected ? 'HL2 CONNECTED' : 'SIMULATED IONOSPHERE');
+    badge.className = 'sim' + (R.connected && !BUNDLE ? ' on' : '');
+  }
+  const c = $('#radConnect');
+  if (c) c.textContent = R.connected ? 'Disconnect' : 'Connect';
+  ['#radPtt', '#radListen'].forEach(sel => { const b = $(sel); if (b) b.disabled = !R.connected; });
+  const air = R.connected && R.air;
+  $$('#radMode button').forEach(b => {
+    b.disabled = !R.connected;
+    b.classList.toggle('on', b.dataset.mode === (air ? 'air' : 'sim'));
+  });
+}
+
+async function radioFind() {
+  const list = $('#radList');
+  list.innerHTML = '<div class="hint">broadcasting to 255.255.255.255:1024…</div>';
+  try {
+    const d = await radioPost('/api/radio/discover', {});
+    if (d.error) throw new Error(d.error);
+    if (!d.radios || !d.radios.length) {
+      list.innerHTML = '<div class="hint warn">no radio answered — check power, cable and subnet</div>';
+      return;
+    }
+    list.innerHTML = '';
+    d.radios.forEach(r => {
+      const b = document.createElement('button');
+      b.className = 'found';
+      b.innerHTML = `<b>${esc(r.board)}</b><span>${esc(r.ip)} · ${esc(r.mac)}</span>` +
+                    `<em>fw ${esc(r.firmware)} · ${r.receivers} rx</em>`;
+      b.onclick = () => { $('#radIp').value = r.ip; connectRadio(r); };
+      list.appendChild(b);
+    });
+  } catch (e) {
+    list.innerHTML = '<div class="hint warn">' + esc(String(e.message || e)) + '</div>';
+  }
+}
+
+async function connectRadio(found) {
+  const body = {
+    ip: $('#radIp').value.trim(),
+    rate: parseInt($('#radRate').value, 10),
+    freq_hz: Math.round(parseFloat($('#radFreq').value) * 1e6),
+    lna_db: parseInt($('#radLna').value, 10),
+    drive: parseInt($('#radDrive').value, 10)
+  };
+  if (found) {
+    body.mac = found.mac; body.board = found.board;
+    body.receivers = found.receivers; body.firmware = found.firmware;
+  }
+  $('#radConnect').disabled = true;
+  try {
+    const d = await radioPost('/api/radio/connect', body);
+    if (d.error) throw new Error(d.error);
+    // Connecting never arms the transmitter by itself: the operator has to pick
+    // "On air" before a message leaves the aerial.
+    R.connected = true; R.info = d; R.air = false;
+    addNote(`radio connected: ${d.board} · ${(d.freq_hz / 1e6).toFixed(6)} MHz · ` +
+            `${Math.round(d.rate / 1000)} kHz · receive only until you choose On air`);
+    startRadioPoll();
+  } catch (e) {
+    addNote('radio: ' + String(e.message || e), 'bad');
+  } finally {
+    $('#radConnect').disabled = false;
+    renderRadio();
+  }
+}
+
+async function disconnectRadio() {
+  // Stop polling first, so no request is in flight that could mistake the
+  // teardown for the radio disappearing.
+  if (R.poll) { clearInterval(R.poll); R.poll = null; }
+  R.connected = false;
+  try { await radioPost('/api/radio/disconnect', {}); } catch (e) { /* already gone */ }
+  R.info = null;
+  renderRadio();
+  addNote('radio disconnected — back to the simulated ionosphere');
+}
+
+async function pushRadioSettings() {
+  if (!R.connected) return;
+  const body = {
+    rate: parseInt($('#radRate').value, 10),
+    freq_hz: Math.round(parseFloat($('#radFreq').value) * 1e6),
+    lna_db: parseInt($('#radLna').value, 10),
+    drive: parseInt($('#radDrive').value, 10)
+  };
+  try {
+    const d = await radioPost('/api/radio/set', body);
+    if (d.error) throw new Error(d.error);
+    R.info = d; renderRadio();
+  } catch (e) { addNote('radio: ' + String(e.message || e), 'bad'); }
+}
+
+async function togglePtt() {
+  if (!R.connected) return;
+  const on = !(R.info && R.info.ptt);
+  try {
+    const d = await radioPost('/api/radio/set', { ptt: on });
+    if (d.error) throw new Error(d.error);
+    R.info = d;
+    lamp(on ? 'tx' : 'rx');
+    $('#radPtt').classList.toggle('on', on);
+    addNote(on ? `PTT down — carrier keyed at drive ${d.drive}` : 'PTT up');
+  } catch (e) { addNote('radio: ' + String(e.message || e), 'bad'); }
+}
+
+async function radioListen() {
+  if (!R.connected || R.busy) return;
+  R.busy = true;
+  $('#radListen').disabled = true;
+  const secs = 3;
+  addNote(`listening on ${(R.info.freq_hz / 1e6).toFixed(6)} MHz for ${secs} s…`);
+  try {
+    const d = await radioPost('/api/radio/decode',
+      { profile: S.profile, mcs: S.level, seconds: secs });
+    if (d.error) throw new Error(d.error);
+    const a = d.attempts[0];
+    if (d.waterfall) pushBurst(d.waterfall);
+    if (a.header_ok) {
+      addMsg('rx', a.decoded || '(header ok, payload not recovered)',
+        ['radio', `${a.blocks_ok.filter(Boolean).length}/${a.blocks_ok.length} blocks`,
+         `${fmt(a.reported_snr)} dB`]);
+      addNote(`decoded ${d.captured_s} s of air in ${d.elapsed_s} s`);
+    } else {
+      addNote(`nothing decoded — header lost in ${d.captured_s} s of captured air`, 'warn');
+    }
+  } catch (e) {
+    addNote('radio: ' + String(e.message || e), 'bad');
+  } finally {
+    R.busy = false;
+    $('#radListen').disabled = !R.connected;
+  }
+}
+
+async function radioSend(text, m) {
+  addMsg('tx', text, [`L${String(S.level + 1).padStart(2, '0')}`, `${m.bps} bps`, 'on air']);
+  lamp('tx');
+  try {
+    const d = await radioPost('/api/radio/transmit', {
+      profile: S.profile, mcs: S.level, text,
+      drive: parseInt($('#radDrive').value, 10)
+    });
+    if (d.error) throw new Error(d.error);
+    addNote(`keyed ${d.airtime_s} s at drive ${d.drive} · one half-duplex radio cannot hear its ` +
+            `own burst — Listen with a second receiver on frequency`);
+    $('#stAir').textContent = d.airtime_s + ' s';
+    $('#stBurst').textContent = `${d.sent.blocks} blk`;
+  } catch (e) {
+    addNote('radio: ' + String(e.message || e), 'bad');
+  } finally {
+    lamp('rx');
+  }
+}
+
+function startRadioPoll() {
+  if (R.poll) clearInterval(R.poll);
+  R.poll = setInterval(async () => {
+    if (!R.connected) return;
+    try {
+      const d = await fetch('/api/radio/spectrum').then(r => r.json());
+      if (d.error) {
+        // The radio went away under us (unplugged, another client took it).  A
+        // deliberate disconnect has already cleared the poll handle, so only a
+        // genuine loss of the stream reaches this note.
+        if (!R.poll) return;
+        clearInterval(R.poll); R.poll = null;
+        R.connected = false; R.info = null;
+        renderRadio();
+        addNote('radio stopped streaming: ' + d.error, 'bad');
+        return;
+      }
+      if (d.row) drawSpectrumRow(d.row);
+    } catch (e) { /* a dropped poll is not worth a log line */ }
+  }, 180);
+}
+
+function drawSpectrumRow(b64) {
+  const raw = atob(b64);
+  const n = raw.length || 1;
+  const { ctx, w } = wfCtx();
+  const h = 2;
+  scrollDown(h);
+  const img = ctx.createImageData(w, h);
+  for (let x = 0; x < w; x++) {
+    const v = raw.charCodeAt(Math.min(n - 1, Math.floor(x * n / w)));
+    const [r, g, b] = pal(v);
+    for (let y = 0; y < h; y++) {
+      const i = ((y * w) + x) * 4;
+      img.data[i] = r; img.data[i + 1] = g; img.data[i + 2] = b; img.data[i + 3] = 255;
+    }
+  }
+  ctx.putImageData(img, 0, 0);
+}
+
+/* --------------------------------------------------------------- services */
+const SV = { host: null, tci: null };
+
+async function refreshServices() {
+  try {
+    const [s, t] = await Promise.all([
+      fetch('/api/services').then(r => r.json()),
+      fetch('/api/tci').then(r => r.json())
+    ]);
+    SV.host = s.host; SV.tci = t;
+    renderServices();
+  } catch (e) { /* the console server is gone; nothing to poll */ }
+}
+
+function renderServices() {
+  const v = SV.host || {};
+  const p = v.protocol || {};
+  $('#svcStart').textContent = v.running ? 'Stop modem host' : 'Start modem host';
+  $('#svcNote').textContent = v.running ? (p.linked ? 'linked' : 'idle') : 'off';
+  $('#svcState').textContent = v.running
+    ? `${p.mycall || 'N0CALL'} · BW${p.bandwidth || 2300} · ` +
+      `${p.linked ? 'linked to ' + (p.peer || '?') : 'listening on 8300'}` +
+      (p.bytes_rx ? `\n${p.bytes_tx} B out · ${p.bytes_rx} B in` : '')
+    : 'modem host off — PAT and VarAC have nothing to attach to';
+  $('#svcLog').textContent = (v.log || []).slice(-4).reverse()
+    .map(l => l.slice(0, 44)).join('\n');
+
+  const t = SV.tci || {};
+  $('#tciConnect').textContent = t.connected ? 'Disconnect TCI' : 'Connect TCI';
+  $('#tciPtt').disabled = !t.connected;
+  $('#tciPtt').classList.toggle('on', !!t.ptt);
+  $('#tciState').textContent = t.connected
+    ? `${t.device || 'TCI'} · ${t.mode} · ${((t.vfo_hz || 0) / 1e6).toFixed(6)} MHz\n` +
+      `${t.rx_frames} rx / ${t.tx_frames} tx frames`
+    : 'no TCI session';
+}
+
+async function startServices() {
+  const d = await radioPost('/api/services/start', {
+    mycall: ($('#myCall').value.trim() || 'N0CALL').toUpperCase(),
+    snr: S.snr, channel: S.path
+  });
+  if (d.error) { addNote('services: ' + d.error, 'bad'); return; }
+  SV.host = d.host;
+  renderServices();
+  addNote('modem host listening on 8300 (commands) and 8301 (data) — ' +
+          'point PAT or VarAC at localhost:8300');
+}
+
+async function stopServices() {
+  const d = await radioPost('/api/services/stop', {});
+  SV.host = d.host;
+  renderServices();
+  addNote('modem host stopped; the ports are free again');
+}
+
+async function hostCmd(line) {
+  const d = await radioPost('/api/services/command', { line, snr: S.snr });
+  if (d.error) { addNote('services: ' + d.error, 'bad'); return null; }
+  SV.host = d.host;
+  renderServices();
+  return d;
+}
+
+async function connectLink() {
+  if (!(SV.host && SV.host.running)) await startServices();
+  if (!(SV.host && SV.host.running)) return;
+  const me = ($('#myCall').value.trim() || 'N0CALL').toUpperCase();
+  const to = $('#toCall').value.trim().toUpperCase();
+  if (!to) { addNote('put a callsign in TO before connecting', 'warn'); return; }
+  await hostCmd(`MYCALL ${me}`);
+  await hostCmd(`CONNECT ${me} ${to}`);
+  addNote(`linked to ${to} through the modem host — bytes written to 8301 cross the modem`);
+}
+
+async function abortLink() {
+  if (!(SV.host && SV.host.running)) { addNote('nothing to abort: the modem host is off', 'warn'); return; }
+  await hostCmd('ABORT');
+  addNote('link aborted');
+}
+
+async function toggleTci() {
+  if ((SV.tci || {}).connected) {
+    await radioPost('/api/tci/disconnect', {});
+    addNote('TCI session closed');
+  } else {
+    const d = await radioPost('/api/tci/connect', {
+      url: $('#tciUrl').value.trim(),
+      freq_hz: Math.round(parseFloat($('#radFreq').value) * 1e6),
+      mode: 'USB'
+    });
+    if (d.error) { addNote('tci: ' + d.error, 'bad'); return; }
+    addNote(`TCI connected: ${d.device || d.url} · ${((d.vfo_hz || 0) / 1e6).toFixed(6)} MHz`);
+  }
+  await refreshServices();
+}
+
+async function tciPtt() {
+  const on = !((SV.tci || {}).ptt);
+  const d = await radioPost('/api/tci/set', { ptt: on });
+  if (d.error) { addNote('tci: ' + d.error, 'bad'); return; }
+  lamp(on ? 'tx' : 'rx');
+  await refreshServices();
+}
+
+$('#btnConnect').addEventListener('click', connectLink);
+$('#btnAbort').addEventListener('click', abortLink);
+$('#svcStart').addEventListener('click', () =>
+  ((SV.host && SV.host.running) ? stopServices() : startServices()));
+$('#tciConnect').addEventListener('click', toggleTci);
+$('#tciPtt').addEventListener('click', tciPtt);
+$$('.bwrow button').forEach(b => b.addEventListener('click', async () => {
+  await hostCmd('BW' + b.dataset.bw);
+  addNote('bandwidth set to ' + b.dataset.bw + ' Hz for the modem host');
+}));
+/* --------------------------------------------------------------------- CAT */
+/* Hamlib's rigctld does the rig talking: frequency, mode, PTT, S-meter.  The
+   standalone file has no server to ask, so the panel says so instead of
+   pretending a radio is attached. */
+const CAT = { st: null, rigs: [], timer: null, local: (typeof BUNDLE === 'undefined' || !BUNDLE) };
+
+async function catList(q) {
+  if (!CAT.local) return;
+  try {
+    const d = await fetch('/api/cat/rigs?q=' + encodeURIComponent(q || '')).then(r => r.json());
+    CAT.rigs = d.rigs || [];
+    const sel = $('#catModel');
+    sel.innerHTML = '';
+    CAT.rigs.forEach(r => {
+      const o = document.createElement('option');
+      o.value = r.model;
+      o.textContent = `${r.model} · ${r.mfg} ${r.name}`.slice(0, 46);
+      sel.appendChild(o);
+    });
+  } catch (e) { /* console server gone */ }
+}
+
+async function refreshCat() {
+  if (!CAT.local) { $('#catState').textContent = 'CAT needs the local console'; return; }
+  try {
+    CAT.st = await fetch('/api/cat').then(r => r.json());
+    renderCat();
+  } catch (e) { /* the console server is gone; nothing to poll */ }
+}
+
+function renderCat() {
+  const s = CAT.st || {};
+  $('#catConnect').textContent = s.connected ? 'Disconnect CAT' : 'Connect CAT';
+  $('#catPtt').disabled = !s.connected;
+  $('#catPtt').classList.toggle('on', !!s.ptt);
+  $('#catNote').textContent = s.connected ? (s.rigctld ? 'rigctld' : 'linked') : 'hamlib';
+  if (!s.connected) { $('#catState').textContent = 'no CAT session'; return; }
+  const strength = (s.strength === null || s.strength === undefined) ? '—' : s.strength;
+  $('#catState').textContent =
+    `${((s.freq_hz || 0) / 1e6).toFixed(6)} MHz · ${s.mode || '?'}` +
+    `${s.passband ? ' ' + s.passband : ''} · PTT ${s.ptt ? 'ON' : 'off'} · S ${strength}` +
+    (s.model ? `\nmodel ${s.model}${s.device ? ' on ' + s.device : ''}` : '\nexternal rigctld') +
+    (s.error ? `\n${s.error}` : '');
+  if (s.freq_hz) $('#catFreq').value = (s.freq_hz / 1e6).toFixed(6);
+  if (s.mode) $('#catMode2').value = s.mode;
+}
+
+async function toggleCat() {
+  if ((CAT.st || {}).connected) {
+    await radioPost('/api/cat/disconnect', {});
+    addNote('CAT session closed; the serial port is free');
+  } else {
+    const hp = ($('#catHost').value.trim() || '127.0.0.1:4532').split(':');
+    const body = {
+      host: hp[0] || '127.0.0.1',
+      port: parseInt(hp[1] || '4532', 10),
+      device: $('#catDevice').value.trim() || null,
+      baud: parseInt($('#catBaud').value, 10) || null,
+      freq_hz: Math.round(parseFloat($('#catFreq').value) * 1e6) || null,
+      mode: $('#catMode2').value
+    };
+    if ($('#catManage').checked && $('#catModel').value) {
+      body.model = parseInt($('#catModel').value, 10);
+    }
+    const d = await radioPost('/api/cat/connect', body);
+    if (d.error) { addNote('cat: ' + d.error, 'bad'); return; }
+    addNote(`CAT via Hamlib: ${d.mode || '?'} on ${((d.freq_hz || 0) / 1e6).toFixed(6)} MHz` +
+            (d.rigctld ? ` — rigctld pid ${d.pid}` : ' — external rigctld'));
+  }
+  await refreshCat();
+}
+
+async function catApply() {
+  const hz = Math.round(parseFloat($('#catFreq').value) * 1e6);
+  if (!hz) { addNote('put a frequency in MHz first', 'warn'); return; }
+  const d = await radioPost('/api/cat/set', { freq_hz: hz, mode: $('#catMode2').value });
+  if (d.error) { addNote('cat: ' + d.error, 'bad'); return; }
+  addNote(`rig moved to ${((d.freq_hz || hz) / 1e6).toFixed(6)} MHz ${d.mode}`);
+  await refreshCat();
+}
+
+async function catPtt() {
+  const on = !((CAT.st || {}).ptt);
+  const d = await radioPost('/api/cat/set', { ptt: on });
+  if (d.error) { addNote('cat: ' + d.error, 'bad'); return; }
+  lamp(on ? 'tx' : 'rx');
+  await refreshCat();
+}
+
+async function catRaw() {
+  const line = $('#catRaw').value.trim();
+  if (!line) return;
+  const d = await radioPost('/api/cat/command', { line });
+  if (d.error) { addNote('cat: ' + d.error, 'bad'); return; }
+  addNote(`cat ${line} → ${(d.reply || []).join(' ').slice(0, 40) || 'ok'}`);
+  if (d.status) { CAT.st = d.status; renderCat(); }
+}
+
+$('#catSend').addEventListener('click', () => { if (CAT.local) catRaw(); });
+$('#catConnect').addEventListener('click', () => { if (CAT.local) toggleCat(); });
+$('#catApply').addEventListener('click', () => { if (CAT.local) catApply(); });
+$('#catPtt').addEventListener('click', () => { if (CAT.local) catPtt(); });
+$('#catQuery').addEventListener('input', e => {
+  clearTimeout(CAT.timer);
+  CAT.timer = setTimeout(() => catList(e.target.value), 250);
+});
+catList('dummy');
+setInterval(() => { refreshServices(); refreshCat(); }, 2500);
+
+function cur() { return S.profiles.find(p => p.id === S.profile); }
+function mode() { return cur().modes[S.level]; }
+
+/* ---------------------------------------------------------------- bootstrap */
+// The propagation model and the lab console are instruments for exercising the
+// modem, not controls for operating a station, so they are hidden unless the
+// server's config file asks for them.  Without a config file nothing is
+// revealed, and the panel is not merely disabled -- it is not there.
+async function applyUiConfig() {
+  // The offline single-file build *is* the simulated channel, so its
+  // propagation controls are the demonstration rather than an instrument.
+  let dev = !!BUNDLE;
+  if (!BUNDLE) {
+    try {
+      const c = await fetch('/api/config').then(r => r.json());
+      dev = !!c.developer;
+    } catch (e) { dev = false; }
+  }
+  $$('[data-dev]').forEach(el => { el.hidden = !dev; });
+}
+
+async function boot() {
+  await applyUiConfig();
+  const d = await apiGet('/api/modes');
+  S.profiles = d.profiles;
+  renderBands();
+  buildMeter();
+  pickAuto(true);
+  renderLevels();
+  startWaterfall();
+  addNote('link established · audio path is simulated, nothing is transmitted on air');
+}
+
+function renderBands() {
+  const el = $('#bw');
+  el.innerHTML = '';
+  for (const b of BAND) {
+    const btn = document.createElement('button');
+    btn.textContent = b.label;
+    btn.className = b.id === S.profile ? 'on' : '';
+    btn.onclick = () => {
+      S.profile = b.id;
+      $('#bwNote').textContent = b.hz + ' Hz';
+      pickAuto(true);
+      renderBands(); renderLevels(); syncStatus();
+    };
+    el.appendChild(btn);
+  }
+  $('#bwNote').textContent = BAND.find(b => b.id === S.profile).hz + ' Hz';
+}
+
+function renderLevels() {
+  const el = $('#levels');
+  el.innerHTML = '';
+  const p = cur();
+  p.modes.forEach((m, i) => {
+    const d = document.createElement('div');
+    d.className = 'lv' + (i === S.level ? ' on' : '');
+    d.title = `${m.label} · ${m.bps} bps · measured ${fmt(m.thr)} dB at 10 % block error`;
+    d.innerHTML = `<span class="n">L${String(i + 1).padStart(2, '0')}</span>` +
+      `<span class="t">${esc(m.label)}</span><span class="r">${m.bps}</span>`;
+    d.onclick = () => { S.level = i; S.auto = false; $('#auto').checked = false; renderLevels(); syncStatus(); };
+    el.appendChild(d);
+  });
+  $('#lvlNote').textContent = S.auto ? 'auto' : 'manual';
+}
+
+function pickAuto(force) {
+  if (!S.auto && !force) return;
+  const modes = cur().modes;
+  let best = 0;
+  for (let i = 0; i < modes.length; i++) if (S.snr - 3 >= modes[i].thr) best = i;
+  S.level = best;
+}
+
+function syncStatus() {
+  const m = mode(), p = cur();
+  $('#stLvl').textContent = 'L' + String(S.level + 1).padStart(2, '0');
+  $('#stMode').textContent = m.label;
+  $('#stRate').textContent = m.bps + ' bps';
+  $('#stSnr').textContent = S.lastDb === null ? '—' : fmt(S.lastDb) + ' dB';
+  $('#lvchip').textContent = 'L' + String(S.level + 1).padStart(2, '0') + ' · ' + m.bps + ' bps';
+  $('#lvlNote').textContent = S.auto ? 'auto' : 'manual';
+  $('#pathNote').textContent = $('#path').selectedOptions[0].textContent;
+  $('#bwNote').textContent = BAND.find(b => b.id === S.profile).hz + ' Hz';
+  setMeter(S.lastDb === null ? S.snr : S.lastDb);
+}
+
+/* ------------------------------------------------------------------- S-meter */
+function buildMeter() {
+  const bar = $('#sbar');
+  bar.innerHTML = '';
+  for (let i = 0; i < 24; i++) bar.appendChild(document.createElement('i'));
+}
+function setMeter(db) {
+  const segs = $$('#sbar i');
+  const frac = Math.max(0, Math.min(1, (db + 12) / 38));
+  const n = Math.round(frac * segs.length);
+  segs.forEach((s, i) => {
+    s.className = (i < n ? 'on' : '') + (i >= 18 ? ' hot' : '');
+  });
+  const s = Math.max(1, Math.min(9, Math.round(9 + (db - 6) / 6)));
+  $('#sUnit').textContent = db > 12 ? `S9+${Math.round(db - 12)}` : (db > 6 ? 'S9' : 'S' + s);
+}
+
+/* --------------------------------------------------------------- waterfall */
+const WF_PAL = [
+  [0.00, [4, 8, 14]], [0.20, [10, 30, 46]], [0.42, [16, 74, 92]],
+  [0.66, [40, 156, 138]], [0.86, [150, 226, 160]], [1.00, [246, 244, 206]],
+];
+function pal(v) {
+  v = Math.max(0, Math.min(1, v / 255));
+  for (let i = 1; i < WF_PAL.length; i++) {
+    if (v <= WF_PAL[i][0]) {
+      const [a, ca] = WF_PAL[i - 1], [b, cb] = WF_PAL[i];
+      const f = (v - a) / Math.max(b - a, 1e-6);
+      return ca.map((c, k) => Math.round(c + (cb[k] - c) * f));
+    }
+  }
+  return WF_PAL[WF_PAL.length - 1][1];
+}
+
+function wfCtx() {
+  const cv = $('#wfall');
+  const w = cv.clientWidth || 800, h = cv.clientHeight || 176;
+  if (cv.width !== w || cv.height !== h) { cv.width = w; cv.height = h; }
+  return { cv, ctx: cv.getContext('2d'), w, h };
+}
+
+function scrollDown(px) {
+  const { cv, ctx } = wfCtx();
+  ctx.globalCompositeOperation = 'copy';
+  ctx.drawImage(cv, 0, px);
+  ctx.globalCompositeOperation = 'source-over';
+  ctx.fillStyle = '#04070a';
+  ctx.fillRect(0, 0, cv.width, px);
+}
+
+let lastTick = 0;
+function idleRow() {
+  const { cv, ctx } = wfCtx();
+  const rowH = 2;
+  scrollDown(rowH);
+  const img = ctx.createImageData(cv.width, rowH);
+  const d = img.data;
+  // a low noise floor with a slow drift, so a quiet band still looks alive
+  const drift = 26 + 8 * Math.sin(Date.now() / 4200);
+  for (let x = 0; x < cv.width; x++) {
+    for (let y = 0; y < rowH; y++) {
+      const v = drift + Math.random() * 22;
+      const [r, g, b] = pal(v);
+      const i = ((y * cv.width) + x) * 4;
+      d[i] = r; d[i + 1] = g; d[i + 2] = b; d[i + 3] = 255;
+    }
+  }
+  ctx.putImageData(img, 0, 0);
+  // carrier line
+  ctx.fillStyle = 'rgba(95,182,232,.20)';
+  ctx.fillRect(Math.round(cv.width / 2), 0, 1, rowH);
+}
+
+function startWaterfall() {
+  const loop = t => {
+    // When the radio is connected the waterfall carries real RF from its own
+    // polls, so the synthetic noise floor would only paint over it.
+    if (t - lastTick > 90 && !R.connected) { lastTick = t; idleRow(); }
+    requestAnimationFrame(loop);
+  };
+  requestAnimationFrame(loop);
+}
+
+function pushBurst(wf) {
+  if (!wf) return;
+  const { cv, ctx, w } = wfCtx();
+  const tmp = document.createElement('canvas');
+  tmp.width = wf.w; tmp.height = wf.h;
+  const tctx = tmp.getContext('2d');
+  const raw = atob(wf.data), u8 = new Uint8Array(raw.length);
+  for (let i = 0; i < raw.length; i++) u8[i] = raw.charCodeAt(i);
+  const img = tctx.createImageData(wf.w, wf.h);
+  for (let i = 0; i < u8.length; i++) {
+    const [r, g, b] = pal(u8[i]);
+    img.data[i * 4] = r; img.data[i * 4 + 1] = g; img.data[i * 4 + 2] = b; img.data[i * 4 + 3] = 255;
+  }
+  tctx.putImageData(img, 0, 0);
+  const stripH = Math.max(34, Math.min(64, Math.round(cv.height * 0.28)));
+  scrollDown(stripH);
+  ctx.imageSmoothingEnabled = true;
+  ctx.globalAlpha = 0.95;
+  ctx.drawImage(tmp, 0, 0, wf.w, wf.h, 0, 0, w, stripH);
+  ctx.globalAlpha = 1;
+  ctx.fillStyle = 'rgba(120,240,200,.35)';
+  ctx.fillRect(0, stripH, w, 1);
+}
+
+/* ------------------------------------------------------------------ traffic */
+function addMsg(dir, text, meta) {
+  const el = document.createElement('div');
+  el.className = 'msg ' + dir;
+  const bits = (meta || []).map(m => `<span>${esc(m)}</span>`).join('');
+  el.innerHTML = `<div class="m"><b>${dir.toUpperCase()}</b><span>${now()}</span>${bits}</div>` +
+    `<p>${esc(text)}</p>`;
+  $('#log').appendChild(el);
+  $('#log').scrollTop = $('#log').scrollHeight;
+  return el;
+}
+function addNote(text, cls) {
+  const el = document.createElement('div');
+  el.className = 'note' + (cls ? ' ' + cls : '');
+  el.textContent = text;
+  $('#log').appendChild(el);
+  $('#log').scrollTop = $('#log').scrollHeight;
+}
+
+function lamp(state) {
+  const l = $('#lamp');
+  l.className = 'lamp' + (state === 'tx' ? ' tx' : '');
+  $('#lampTxt').textContent = state === 'tx' ? 'TX' : (state === 'rx' ? 'RX' : 'READY');
+}
+
+async function send() {
+  const input = $('#input');
+  const picker = $('#phrase');
+  const text = (picker ? picker.value : input.value).trim();
+  if (!text || S.busy) return;
+  S.busy = true;
+  $('#send').disabled = true;
+  if (input) input.value = '';
+
+  if (S.auto) { pickAuto(true); renderLevels(); }
+  const m = mode();
+  const snr = S.qsb ? Math.max(-14, Math.min(30, S.snr + (Math.random() * 2 - 1) * 1.5)) : S.snr;
+
+  if (R.connected && R.air) {
+    try { await radioSend(text, m); }
+    finally { S.busy = false; $('#send').disabled = false; input.focus(); }
+    return;
+  }
+
+  addMsg('tx', text, [`L${String(S.level + 1).padStart(2, '0')}`, `${m.bps} bps`, `${fmt(snr)} dB`]);
+  lamp('tx');
+
+  try {
+    const d = await apiPost('/api/decode', {
+      profile: S.profile, mcs: S.level, text, snr, channel: S.path, cfo: 0, looks: 1
+    });
+    if (d.error) throw new Error(d.error);
+
+    const rank = x => (x.match ? 4 : 0) + (x.blocks_ok.length && x.blocks_ok.every(Boolean) ? 2 : 0) + (x.header_ok ? 1 : 0);
+    const best = d.attempts.reduce((a, b) => (rank(b) > rank(a) ? b : a), d.attempts[0]);
+    // A lost header means the receiver never formed an S/N estimate; hold null
+    // rather than the -99 sentinel, so the status bar says nothing instead of a
+    // number that would read as a measurement.
+    S.lastDb = best.header_ok ? best.reported_snr : null;
+    pushBurst(d.waterfall);
+
+    const okBlocks = best.blocks_ok.filter(Boolean).length;
+    if (best.match) {
+      lamp('rx');
+      addMsg('rx', best.decoded, [d.sent.label, `${okBlocks}/${best.blocks_ok.length} blocks`,
+        `${fmt(best.reported_snr)} dB`]);
+      addNote(`burst decoded in ${d.elapsed_s} s · ${d.timing.total_s} s of airtime`);
+    } else if (best.header_ok) {
+      lamp('rx');
+      addNote(`burst corrupted — ${okBlocks}/${best.blocks_ok.length} blocks recovered at ${fmt(snr)} dB · ` +
+              `L${String(S.level + 1).padStart(2, '0')} needs ${fmt(m.thr)} dB`, 'warn');
+    } else {
+      lamp('rx');
+      addNote(`no frame — header lost at ${fmt(snr)} dB · ` +
+              `L${String(S.level + 1).padStart(2, '0')} needs ${fmt(m.thr)} dB`, 'bad');
+    }
+    $('#stSnr').textContent = S.lastDb === null ? '—' : fmt(S.lastDb) + ' dB';
+    $('#stBurst').textContent = best.header_ok ? `${okBlocks}/${best.blocks_ok.length}` : 'lost';
+    $('#stAir').textContent = d.timing.total_s + ' s';
+    setMeter(S.lastDb === null ? snr : S.lastDb);
+    if (S.auto) { pickAuto(true); renderLevels(); }
+  } catch (e) {
+    lamp('rx');
+    addNote(String(e.message || e), 'bad');
+  } finally {
+    S.busy = false;
+    $('#send').disabled = false;
+    if (input) input.focus();
+    syncStatus();
+  }
+}
+
+/* ------------------------------------------------------------------- wiring */
+$('#send').addEventListener('click', send);
+$('#input').addEventListener('keydown', e => { if (e.key === 'Enter') send(); });
+$('#snr').addEventListener('input', e => {
+  S.snr = parseFloat(e.target.value);
+  $('#snrOut').textContent = fmt(S.snr);
+  if (S.auto) { pickAuto(true); renderLevels(); }
+  S.lastDb = null;
+  syncStatus();
+  setMeter(S.snr);
+});
+$('#auto').addEventListener('change', e => {
+  S.auto = e.target.checked;
+  if (S.auto) { pickAuto(true); renderLevels(); }
+  syncStatus();
+});
+$('#path').addEventListener('change', e => { S.path = e.target.value; syncStatus(); });
+$('#qsb').addEventListener('change', e => { S.qsb = e.target.checked; });
+window.addEventListener('resize', () => { const { cv } = wfCtx(); cv.width = cv.clientWidth; });
+
+$('#radFind').addEventListener('click', radioFind);
+$('#radConnect').addEventListener('click', () => (R.connected ? disconnectRadio() : connectRadio()));
+$('#radPtt').addEventListener('click', togglePtt);
+$('#radListen').addEventListener('click', radioListen);
+['#radFreq', '#radRate', '#radLna', '#radDrive'].forEach(sel =>
+  $(sel).addEventListener('change', pushRadioSettings));
+$$('#radMode button').forEach(b => b.addEventListener('click', () => {
+  R.air = b.dataset.mode === 'air';
+  renderRadio();
+  addNote(R.air ? 'sending goes on air through the radio'
+                : 'sending is decoded through the simulated channel again');
+}));
+
+function setupOffline() {
+  const input = $('#input');
+  if (input) {
+    const sel = document.createElement('select');
+    sel.id = 'phrase';
+    sel.className = 'sel';
+    sel.style.maxWidth = '270px';
+    sel.style.background = '#060b10';
+    BUNDLE.phrases.forEach(p => {
+      const o = document.createElement('option');
+      o.value = p; o.textContent = p;
+      sel.appendChild(o);
+    });
+    input.replaceWith(sel);
+  }
+  // A page opened from disk has no UDP sockets and no local API to talk to.
+  ['#radFind', '#radConnect', '#radPtt', '#radListen', '#radIp', '#radFreq',
+   '#radLna', '#radDrive', '#radRate', '#svcStart', '#tciConnect', '#tciPtt',
+   '#tciUrl', '#btnConnect', '#btnAbort', '#myCall', '#toCall',
+   '#catConnect', '#catPtt', '#catApply', '#catQuery', '#catModel', '#catDevice',
+   '#catBaud', '#catManage', '#catHost', '#catFreq', '#catMode2',
+   '#catRaw', '#catSend'].forEach(s => {
+    const el = $(s); if (el) el.disabled = true;
+  });
+  const link = document.querySelector('.topright a');
+  if (link) link.remove();
+  addNote(`single-file build · ${BUNDLE.count} bursts measured by the Python modem · ` +
+          `choose a recorded phrase, a level and an S/N`);
+}
+
+boot().then(async () => {
+  if (BUNDLE) setupOffline();
+  $('#snrOut').textContent = fmt(S.snr);
+  syncStatus();
+  renderRadio();
+  if (!BUNDLE) { refreshServices(); refreshCat(); }
+  if (!BUNDLE) {
+    $('#input').focus();
+    await radioStatus();
+    if (R.connected) startRadioPoll();
+  }
+});
+</script>
+</body>
+</html>

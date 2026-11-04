@@ -1,0 +1,70 @@
+.TH HALCYON-MODEM 1 "November 2026" "halcyon 0.1.0" "User Commands"
+.SH NAME
+halcyon-modem \- encode and decode Halcyon frames
+.SH SYNOPSIS
+.B halcyon-modem
+.B selftest
+.br
+.B halcyon-modem
+.B rungs
+.br
+.B halcyon-modem
+.B tx
+\fB\-\-mcs\fR \fIN\fR \fB\-\-text\fR \fISTRING\fR \fB\-\-out\fR \fIFILE\fR
+.br
+.B halcyon-modem
+.B rx
+\fB\-\-in\fR \fIFILE\fR [\fB\-\-repeat\fR \fIN\fR]
+.SH DESCRIPTION
+.B halcyon-modem
+is the C++17 implementation of the Halcyon modem core.  It reads and writes
+raw little-endian float32 baseband at 12 kHz, the same format the Python
+implementation uses, and it is wire-compatible with it in both directions.
+.PP
+The wide profile is supported: all 17 speed levels, from QPSK 1/2 to 256QAM
+8/9.  The narrower robust and compact geometries and the single-tone 16-FSK
+path exist only in the Python modem.
+.SH COMMANDS
+.TP
+.B selftest
+Transmit and receive every supported speed level back to back and report
+which ones pass.
+.TP
+.B rungs
+Print the speed ladder: level, modulation, code rate, bit rate and occupied
+bandwidth.
+.TP
+.B tx
+Encode a frame at speed level \fIN\fR and write the baseband samples to
+\fIFILE\fR.
+.TP
+.B rx
+Acquire and decode one burst from \fIFILE\fR and print a JSON result.  With
+\fB\-\-repeat\fR \fIN\fR, decode it \fIN\fR times and report the mean
+milliseconds per frame.
+.SH OPTIONS
+.TP
+.BR \-\-data " " \fIPATH\fR
+Read the rate tables from \fIPATH\fR instead of the default.  Without this
+option halcyon-modem looks beside its own binary, then in
+\fI/usr/share/halcyon/wide.bin\fR, then in \fIcpp/data/wide.bin\fR relative
+to the working directory.  The Debian package installs the table it needs, so
+this is only useful for a build tree or a copy of the tables.
+.SH ENVIRONMENT
+.TP
+.B HALCYON_DEBUG
+When set to 1, print acquisition, header and payload diagnostics on stderr.
+.TP
+.B HALCYON_DATA
+Path to the rate-table file, equivalent to \fB\-\-data\fR.
+.SH EXAMPLES
+.TP
+.B halcyon-modem selftest
+.TP
+.B halcyon-modem tx --mcs 4 --text "test de halcyon k" --out frame.f32
+.TP
+.B halcyon-modem rx --in frame.f32
+.SH SEE ALSO
+.BR halcyon (1)
+.SH AUTHOR
+The Halcyon authors.

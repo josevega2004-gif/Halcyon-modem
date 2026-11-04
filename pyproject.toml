@@ -1,0 +1,28 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "halcyon-modem"
+version = "0.1.0"
+description = "Open HF data modem: OFDM, LDPC, adaptive coding"
+authors = [{name = "Halcyon contributors"}]
+license = "GPL-3.0-or-later"
+license-files = ["LICENSE"]
+requires-python = ">=3.10"
+dependencies = ["numpy>=1.24", "scipy>=1.10"]
+
+[project.scripts]
+halcyon = "halcyon.ui:main"
+halcyon-host = "halcyon.host:main"
+halcyon-switch = "halcyon.switch:main"
+
+[project.optional-dependencies]
+dev = ["pytest>=7"]
+
+[tool.setuptools.packages.find]
+include = ["halcyon*"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "-q"

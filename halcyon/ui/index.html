@@ -1,0 +1,647 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Halcyon — modem console</title>
+<style>
+  :root{
+    --bg:#080b10; --panel:#0f151d; --panel2:#121a23; --line:#1d2834;
+    --ink:#dbe6f0; --dim:#7b8b9e; --faint:#54646f;
+    --mint:#3fe0b0; --amber:#f3b64a; --red:#ff6f6f; --blue:#6cb6ff;
+    --mono: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  }
+  *{box-sizing:border-box}
+  html,body{margin:0;background:var(--bg);color:var(--ink);
+    font:14px/1.45 ui-sans-serif,system-ui,-apple-system,"Segoe UI",Roboto,sans-serif}
+  body{background-image:radial-gradient(1200px 600px at 15% -10%,#12202a 0%,transparent 60%),
+        radial-gradient(900px 500px at 100% 0%,#101b26 0%,transparent 55%);}
+  .app{max-width:1500px;margin:0 auto;padding:16px 18px 40px;display:flex;flex-direction:column;gap:14px}
+
+  /* top bar */
+  .topbar{display:flex;align-items:center;gap:22px;flex-wrap:wrap;
+    padding:12px 16px;border:1px solid var(--line);border-radius:12px;
+    background:linear-gradient(180deg,#101821,#0b1017)}
+  .brand{display:flex;align-items:center;gap:12px;min-width:250px}
+  .glyph{width:34px;height:34px;border-radius:9px;display:grid;place-items:center;
+    background:radial-gradient(circle at 30% 25%,#2a6f60,#0f3b33);color:#9ff5da;
+    border:1px solid #2c7d6c;font-size:17px}
+  .brand h1{margin:0;font-size:15px;letter-spacing:.22em;font-weight:600}
+  .brand p{margin:1px 0 0;font-size:11px;color:var(--dim);letter-spacing:.04em}
+  .geom{display:flex;gap:6px;padding:4px;border:1px solid var(--line);border-radius:9px;background:#0a1017}
+  .geom button{border:0;background:transparent;color:var(--dim);padding:6px 11px;border-radius:6px;
+    font:inherit;font-size:12px;cursor:pointer;display:flex;flex-direction:column;gap:1px;line-height:1.1}
+  .geom button small{font-size:10px;color:var(--faint);font-family:var(--mono)}
+  .geom button.on{background:#16232c;color:var(--ink);box-shadow:inset 0 0 0 1px #24404a}
+  .geom button.on small{color:var(--mint)}
+  .chips{margin-left:auto;display:flex;gap:8px;align-items:center;flex-wrap:wrap;min-width:0;justify-content:flex-end}
+  .chip{font-family:var(--mono);font-size:11px;color:var(--dim);border:1px solid var(--line);
+    border-radius:6px;padding:4px 8px;background:#0b1118}
+  .chip b{color:var(--ink);font-weight:500}
+  .chip.ok{color:#8ef0d0;border-color:#1d4d42}
+
+  /* layout */
+  .grid{display:grid;grid-template-columns:minmax(0,352px) minmax(0,1fr);gap:14px;align-items:start}
+  .rail{display:flex;flex-direction:column;gap:12px}
+  .stage{display:flex;flex-direction:column;gap:12px;min-width:0}
+  .panel{border:1px solid var(--line);border-radius:12px;background:linear-gradient(180deg,var(--panel),#0b1016);
+    padding:13px 14px 14px}
+  .panel h2{margin:0 0 10px;font-size:10.5px;letter-spacing:.16em;text-transform:uppercase;
+    color:var(--dim);font-weight:600;display:flex;justify-content:space-between;align-items:baseline;gap:10px}
+  .panel h2 span{font-family:var(--mono);letter-spacing:0;text-transform:none;color:var(--faint);font-size:11px}
+
+  /* mode ladder */
+  .ladder{max-height:264px;overflow:auto;display:flex;flex-direction:column;gap:2px;
+    scrollbar-width:thin;scrollbar-color:#26333d transparent}
+  .rung{display:grid;grid-template-columns:16px 1fr auto auto;gap:8px;align-items:center;
+    padding:5px 7px;border-radius:7px;border:1px solid transparent;cursor:pointer;font-size:12.5px}
+  .rung:hover{background:#141d26}
+  .rung.on{background:rgba(63,224,176,.07);border-color:rgba(63,224,176,.4)}
+  .rung .ix{font-family:var(--mono);font-size:10px;color:var(--faint)}
+  .rung .nm{min-width:0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+  .rung .rt{font-family:var(--mono);font-size:11.5px;color:var(--mint)}
+  .rung .th{font-family:var(--mono);font-size:11px;color:var(--dim);min-width:52px;text-align:right}
+  .rung.on .rt{color:#9ff5da}
+
+  textarea,input[type=text]{width:100%;background:#0a1118;color:var(--ink);border:1px solid var(--line);
+    border-radius:8px;padding:9px 10px;font:inherit;resize:vertical}
+  textarea:focus,input:focus{outline:none;border-color:#2c5a54;box-shadow:0 0 0 3px rgba(63,224,176,.08)}
+  .hint{font-family:var(--mono);font-size:10.5px;color:var(--faint);margin-top:6px;display:flex;
+    justify-content:space-between;gap:8px}
+  .hint b{color:var(--dim);font-weight:500}
+
+  .row{display:flex;align-items:center;gap:10px;margin-top:10px}
+  .row:first-of-type{margin-top:0}
+  .row label{font-size:11.5px;color:var(--dim);min-width:74px;letter-spacing:.03em}
+  input[type=range]{-webkit-appearance:none;appearance:none;flex:1;height:4px;border-radius:3px;
+    background:#1e2a35;outline:none}
+  input[type=range]::-webkit-slider-thumb{-webkit-appearance:none;width:14px;height:14px;border-radius:50%;
+    background:var(--mint);border:2px solid #0a1016;cursor:pointer;box-shadow:0 0 0 1px #2c5a54}
+  input[type=range]::-moz-range-thumb{width:12px;height:12px;border-radius:50%;background:var(--mint);
+    border:2px solid #0a1016;cursor:pointer}
+  output{font-family:var(--mono);font-size:12px;color:var(--ink);min-width:64px;text-align:right}
+  .seg{display:flex;gap:4px;flex:1}
+  .seg button{flex:1;background:#0a1118;border:1px solid var(--line);color:var(--dim);border-radius:7px;
+    padding:5px 4px;font:inherit;font-size:11px;cursor:pointer}
+  .seg button.on{background:#16232c;color:var(--mint);border-color:#2c5a54}
+
+  .check{display:flex;gap:8px;align-items:flex-start;margin-top:8px;font-size:11.5px;color:var(--dim);cursor:pointer}
+  .check input{accent-color:var(--mint);margin-top:2px}
+  .check b{color:var(--ink);font-weight:500}
+
+  button.go{margin-top:12px;width:100%;padding:11px;border-radius:9px;border:1px solid #2c7d6c;
+    background:linear-gradient(180deg,#1c5c50,#14453c);color:#d7fff2;font:inherit;font-weight:600;
+    letter-spacing:.04em;cursor:pointer;display:flex;align-items:center;justify-content:center;gap:9px}
+  button.go:hover{background:linear-gradient(180deg,#22705f,#17554a)}
+  button.go:disabled{opacity:.55;cursor:progress}
+  button.go .kbd{font-family:var(--mono);font-size:10px;color:#7fd8c2;border:1px solid #2c7d6c;
+    border-radius:4px;padding:1px 5px;font-weight:400}
+  button.go.ghost{margin-top:7px;background:#0d151c;color:#9fd8c8;border-color:#24404a;font-weight:500;font-size:12px}
+  button.go.ghost:hover{background:#122029}
+  .linkstats{font-family:var(--mono);font-size:11px;color:var(--dim);margin-top:9px;line-height:1.65}
+  .linkstats b{color:var(--mint);font-weight:500}
+
+  /* frame anatomy */
+  .bar{display:flex;height:38px;border-radius:8px;overflow:hidden;border:1px solid var(--line);background:#0a1118}
+  .bar div{display:grid;place-items:center;font-family:var(--mono);font-size:10px;color:#04120e;
+    white-space:nowrap;overflow:hidden;transition:flex-grow .25s}
+  .bar .pre{background:#2f6f8f;color:#e8f6ff}
+  .bar .hdr{background:#3fe0b0;color:#062018}
+  .bar .pay{background:#1c4a55;color:#bfe9e2}
+  .meta{display:grid;grid-template-columns:repeat(auto-fit,minmax(118px,1fr));gap:8px;margin-top:11px}
+  .meta div{border:1px solid var(--line);border-radius:8px;padding:7px 9px;background:#0a1118}
+  .meta dt{font-size:10px;letter-spacing:.1em;text-transform:uppercase;color:var(--faint)}
+  .meta dd{margin:2px 0 0;font-family:var(--mono);font-size:12.5px;color:var(--ink)}
+
+  /* capture */
+  .cap{display:grid;grid-template-columns:minmax(0,1fr) 220px;gap:12px;align-items:start}
+  canvas{display:block;width:100%;border-radius:8px;border:1px solid var(--line);background:#060a10}
+  #wf{height:190px;image-rendering:pixelated}
+  #spec{height:190px}
+  audio{width:100%;height:34px;margin-top:10px;filter:invert(.92) hue-rotate(150deg) saturate(.7)}
+  .capnote{font-family:var(--mono);font-size:10px;color:var(--faint);margin-top:6px;display:flex;
+    justify-content:space-between}
+
+  /* receiver */
+  .verdict{display:flex;align-items:baseline;gap:12px;flex-wrap:wrap}
+  .verdict strong{font-size:22px;letter-spacing:.12em}
+  .verdict .sub{font-family:var(--mono);font-size:11.5px;color:var(--dim)}
+  .ok{color:var(--mint)} .bad{color:var(--red)} .warn{color:var(--amber)}
+  .attempt{border:1px solid var(--line);border-radius:10px;padding:10px 11px;margin-top:10px;background:#0a1118}
+  .attempt.on{border-color:#2c5a54;background:#0b151b}
+  .ahead{display:flex;align-items:center;gap:9px;flex-wrap:wrap;margin-bottom:8px}
+  .ahead .lbl{font-size:11px;letter-spacing:.08em;text-transform:uppercase;color:var(--dim)}
+  .badge{font-family:var(--mono);font-size:10px;border-radius:4px;padding:2px 6px;border:1px solid var(--line);color:var(--dim)}
+  .badge.y{color:#8ef0d0;border-color:#1d4d42;background:rgba(63,224,176,.07)}
+  .badge.n{color:#ffb3b3;border-color:#4d2222;background:rgba(255,111,111,.06)}
+  .blocks{display:flex;gap:4px;margin-left:auto}
+  .blocks i{width:16px;height:16px;border-radius:3px;background:#1a232c;border:1px solid #24313c}
+  .blocks i.y{background:var(--mint);border-color:#7df0cd}
+  .blocks i.n{background:rgba(255,111,111,.25);border-color:#7a3030}
+  pre.text{margin:0;padding:8px 10px;border-radius:7px;background:#070c11;border:1px solid #16202a;
+    font-family:var(--mono);font-size:12px;white-space:pre-wrap;word-break:break-word;max-height:130px;overflow:auto}
+  pre.text.dim{color:var(--dim)}
+  .stats{display:flex;gap:14px;flex-wrap:wrap;margin-top:8px;font-family:var(--mono);font-size:10.5px;color:var(--faint)}
+  .stats b{color:var(--dim);font-weight:500}
+
+  /* chart */
+  .chartwrap{margin-top:2px}
+  #chart{height:230px}
+  .legend{display:flex;gap:16px;flex-wrap:wrap;font-family:var(--mono);font-size:10.5px;color:var(--faint);margin-top:8px}
+  .legend i{display:inline-block;width:8px;height:8px;border-radius:50%;margin-right:5px;vertical-align:middle}
+
+  .err{margin-top:8px;font-family:var(--mono);font-size:11.5px;color:#ffb3b3;min-height:0}
+  .busy{cursor:progress}
+  .spinner{width:13px;height:13px;border-radius:50%;border:2px solid rgba(255,255,255,.25);
+    border-top-color:#d7fff2;animation:spin .7s linear infinite}
+  @keyframes spin{to{transform:rotate(360deg)}}
+  .rail,.stage,.panel{min-width:0}
+  @media (max-width:1060px){ .grid{grid-template-columns:minmax(0,1fr)} .cap{grid-template-columns:minmax(0,1fr)} }
+</style>
+</head>
+<body>
+<div class="app">
+
+  <header class="topbar">
+    <div class="brand">
+      <div class="glyph">◈</div>
+      <div>
+        <h1>HALCYON</h1>
+        <p>open HF data modem · OFDM + LDPC · burst ARQ</p>
+      </div>
+    </div>
+    <nav class="geom" id="geom"></nav>
+    <div class="chips" id="chips"></div>
+  </header>
+
+  <div class="grid">
+    <aside class="rail">
+
+      <section class="panel">
+        <h2>Rate ladder <span id="ladderNote"></span></h2>
+        <div class="ladder" id="ladder"></div>
+        <div class="hint"><span>measured S/N at 10 % block error</span><span id="modeMeta"></span></div>
+      </section>
+
+      <section class="panel">
+        <h2>Message <span id="capNote"></span></h2>
+        <textarea id="msg" rows="3" spellcheck="false">The quick brown fox jumps over the lazy dog. 73 de Halcyon.</textarea>
+        <div class="hint"><span id="byteNote">—</span><span>⌘/Ctrl + ↵</span></div>
+      </section>
+
+      <section class="panel">
+        <h2>Channel <span id="chanNote">AWGN</span></h2>
+        <div class="row">
+          <label for="snr">S/N</label>
+          <input type="range" id="snr" min="-12" max="26" step="0.5" value="8">
+          <output id="snrout">+8.0 dB</output>
+        </div>
+        <div class="row">
+          <label>Path</label>
+          <div class="seg" id="chan"></div>
+        </div>
+        <div class="row">
+          <label for="cfo">Tuning</label>
+          <input type="range" id="cfo" min="-70" max="70" step="5" value="0">
+          <output id="cfoout">0 Hz</output>
+        </div>
+        <label class="check"><input type="checkbox" id="looks">
+          <span><b>Second look</b> — keep the failed burst's LLRs and decode again on their sum</span></label>
+      </section>
+
+      <section class="panel">
+        <h2>Run <span id="runNote"></span></h2>
+        <button class="go" id="tx">Transmit &amp; decode <span class="kbd">⌘↵</span></button>
+        <button class="go ghost" id="lnk" title="Frame a short message, run it through the link layer with ACKs and retransmissions">Run a short ARQ transfer</button>
+        <div class="linkstats" id="linkstats"></div>
+        <div class="err" id="err"></div>
+      </section>
+
+    </aside>
+
+    <main class="stage">
+
+      <section class="panel">
+        <h2>Frame <span id="frameNote">—</span></h2>
+        <div class="bar" id="bar">
+          <div class="pre" style="flex:34"></div>
+          <div class="hdr" style="flex:22"></div>
+          <div class="pay" style="flex:44"></div>
+        </div>
+        <div class="meta" id="meta"></div>
+      </section>
+
+      <section class="panel">
+        <h2>Capture <span id="capTitle">received burst</span></h2>
+        <div class="cap">
+          <div>
+            <canvas id="wf"></canvas>
+            <div class="capnote"><span id="wfLeft">—</span><span id="wfRight">—</span></div>
+          </div>
+          <div>
+            <canvas id="spec"></canvas>
+            <div class="capnote"><span>mean spectrum</span><span id="specNote">—</span></div>
+          </div>
+        </div>
+        <audio id="player" controls preload="none"></audio>
+      </section>
+
+      <section class="panel">
+        <h2>Receiver <span id="rxNote">—</span></h2>
+        <div class="verdict" id="verdict">
+          <strong class="bad">IDLE</strong>
+          <span class="sub">frame a message and send it through the channel</span>
+        </div>
+        <div id="attempts"></div>
+      </section>
+
+      <section class="panel">
+        <h2>Ladder <span id="chartNote"></span></h2>
+        <div class="chartwrap"><canvas id="chart"></canvas></div>
+        <div class="legend">
+          <span><i style="background:#3fe0b0"></i>closes at or below this S/N</span>
+          <span><i style="background:#3a4a56"></i>needs more signal</span>
+          <span><i style="background:#f3b64a"></i>current S/N</span>
+          <span style="color:#54646f">dot size ∝ log rate · thresholds measured on AWGN</span>
+        </div>
+      </section>
+
+    </main>
+  </div>
+</div>
+
+<script>
+const $ = (s, r = document) => r.querySelector(s);
+const $$ = (s, r = document) => [...r.querySelectorAll(s)];
+const S = { profiles: [], profile: 'wide', mcs: 0, snr: 8, channel: 'awgn', cfo: 0,
+            busy: false, result: null, limits: {} };
+const CHANNEL_LABEL = { awgn: 'AWGN', good: 'Good fading', moderate: 'Moderate fading', poor: 'Poor fading' };
+const CHANNEL_BTN = { awgn: 'AWGN', good: 'Good', moderate: 'Mod.', poor: 'Poor' };
+
+function fmtDb(v) { return (v >= 0 ? '+' : '') + v.toFixed(1) + ' dB'; }
+function esc(s) { return String(s).replace(/[&<>]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;' }[c])); }
+
+async function boot() {
+  const r = await fetch('/api/modes');
+  const d = await r.json();
+  S.profiles = d.profiles; S.limits = d;
+  renderGeom(); renderChannels();
+  const wide = cur();
+  S.mcs = Math.min(4, wide.modes.length - 1);
+  renderLadder(); syncAll();
+}
+
+function cur() { return S.profiles.find(p => p.id === S.profile); }
+function mode() { return cur().modes[S.mcs]; }
+
+function renderGeom() {
+  const el = $('#geom'); el.innerHTML = '';
+  for (const p of S.profiles) {
+    const b = document.createElement('button');
+    b.className = p.id === S.profile ? 'on' : '';
+    b.innerHTML = `${esc(p.label)}<small>${esc(p.band)}</small>`;
+    b.onclick = () => {
+      S.profile = p.id;
+      S.mcs = Math.min(S.mcs, p.modes.length - 1);
+      renderGeom(); renderLadder(); syncAll();
+    };
+    el.appendChild(b);
+  }
+  const p = cur();
+  $('#chips').innerHTML =
+    `<span class="chip">occupied <b>${p.bw_hz.toFixed(0)} Hz</b> / ${S.limits.fcc_hz} Hz FCC</span>` +
+    `<span class="chip">${p.carriers} carriers · ${p.data_carriers} data · ${p.sym_ms} ms</span>` +
+    `<span class="chip ok">no spreading · HF-legal</span>`;
+}
+
+function renderChannels() {
+  const el = $('#chan'); el.innerHTML = '';
+  for (const c of S.limits.channels) {
+    const b = document.createElement('button');
+    b.className = c === S.channel ? 'on' : '';
+    b.textContent = CHANNEL_BTN[c];
+    b.title = CHANNEL_LABEL[c];
+    b.onclick = () => { S.channel = c; renderChannels(); syncAll(); };
+    el.appendChild(b);
+  }
+}
+
+function renderLadder() {
+  const el = $('#ladder'); el.innerHTML = '';
+  const p = cur();
+  p.modes.forEach((m, i) => {
+    const d = document.createElement('div');
+    d.className = 'rung' + (i === S.mcs ? ' on' : '');
+    const note = m.rep > 1 ? ` ×${m.rep}` : (m.bm > 1 ? ` L${m.bm}` : '');
+    d.innerHTML = `<span class="ix">${String(i).padStart(2, '0')}</span>` +
+      `<span class="nm">${esc(m.label)}</span>` +
+      `<span class="rt">${m.bps} bps</span>` +
+      `<span class="th">${fmtDb(m.thr)}</span>`;
+    d.title = `${m.label}: ${m.bps} bps, measured ${fmtDb(m.thr)} channel S/N, ` +
+              `${m.cap_bytes} B/block, up to ${m.max_bytes} B per burst${note}`;
+    d.onclick = () => { S.mcs = i; renderLadder(); syncAll(); };
+    el.appendChild(d);
+  });
+  $('#ladderNote').textContent = `${p.label} · ${p.modes.length} rungs`;
+}
+
+function renderMeta() {
+  const m = mode();
+  const bits = new TextEncoder().encode($('#msg').value).length;
+  $('#capNote').textContent = `${m.bps} bps · ${m.cap_bytes} B/block`;
+  $('#byteNote').innerHTML = `<b>${bits}</b> B queued · burst holds ${m.max_bytes} B`;
+  $('#modeMeta').textContent = `#${String(S.mcs).padStart(2, '0')} ${m.kind === 'mfsk' ? m.tones + '-FSK' : 'QAM'}`;
+  $('#runNote').textContent = `${cur().band} geometry`;
+  $('#chanNote').textContent = CHANNEL_LABEL[S.channel];
+}
+
+function syncAll() {
+  S.snr = parseFloat($('#snr').value);
+  S.cfo = parseFloat($('#cfo').value);
+  $('#snrout').textContent = fmtDb(S.snr);
+  $('#cfoout').textContent = (S.cfo > 0 ? '+' : '') + S.cfo.toFixed(0) + ' Hz';
+  renderMeta(); drawChart();
+  const m = mode();
+  const margin = S.snr - m.thr;
+  $('#frameNote').textContent = margin >= 0
+    ? `${fmtDb(margin)} over this rung's threshold`
+    : `${fmtDb(-margin)} short of this rung's threshold`;
+  $('#frameNote').style.color = margin >= 0 ? 'var(--mint)' : 'var(--amber)';
+}
+
+async function transmit() {
+  if (S.busy) return;
+  S.busy = true;
+  const btn = $('#tx');
+  btn.disabled = true;
+  btn.innerHTML = '<span class="spinner"></span> running the receiver…';
+  $('#err').textContent = '';
+  try {
+    const body = {
+      profile: S.profile, mcs: S.mcs, text: $('#msg').value,
+      snr: S.snr, channel: S.channel, cfo: S.cfo, seed: 7,
+      looks: $('#looks').checked ? 1 : 0
+    };
+    const r = await fetch('/api/decode', { method: 'POST', headers: { 'Content-Type': 'application/json' },
+                                           body: JSON.stringify(body) });
+    const d = await r.json();
+    if (d.error) throw new Error(d.error);
+    S.result = d;
+    renderFrame(d); renderCapture(d); renderReceiver(d); drawChart();
+  } catch (e) {
+    $('#err').textContent = String(e.message || e);
+  } finally {
+    S.busy = false; btn.disabled = false;
+    btn.innerHTML = 'Transmit &amp; decode <span class="kbd">⌘↵</span>';
+  }
+}
+
+function renderFrame(d) {
+  const t = d.timing;
+  const el = $('#bar');
+  const seg = [['pre', t.preamble_s, 'preamble'], ['hdr', t.header_s, 'header'], ['pay', t.payload_s, 'payload']];
+  el.innerHTML = seg.map(([c, s, n]) =>
+    `<div class="${c}" style="flex:${Math.max(s, 0.001)}" title="${n}: ${s.toFixed(2)} s">${
+      s / t.total_s > 0.11 ? `${n} ${s.toFixed(1)}s` : ''}</div>`).join('');
+  const s = d.sent;
+  $('#meta').innerHTML = [
+    ['airtime', t.total_s.toFixed(2) + ' s'],
+    ['rate', s.bps + ' bps'],
+    ['blocks', `${s.blocks} × ${s.block_bits} b`],
+    ['header', `${s.header_repeat}× copy`],
+    ['mode', s.label],
+    ['samples', t.samples.toLocaleString()],
+  ].map(([k, v]) => `<div><dt>${k}</dt><dd>${esc(v)}</dd></div>`).join('');
+}
+
+function renderCapture(d) {
+  const url = `/api/audio?profile=${encodeURIComponent(d.profile)}&mcs=${d.sent.mcs}` +
+              `&text=${encodeURIComponent(d.sent.text)}`;
+  $('#player').src = url;
+  $('#capTitle').textContent = `${d.channel.toUpperCase()} at ${fmtDb(d.snr)}`;
+  const wf = d.waterfall;
+  if (wf) {
+    drawWaterfall(wf); drawSpectrum(wf);
+    $('#wfLeft').textContent = `${wf.w} frames · ${d.timing.total_s.toFixed(1)} s across`;
+    $('#wfRight').textContent = `0–${(wf.span_hz / 1000).toFixed(1)} kHz, ${d.profile} geometry`;
+    $('#specNote').textContent = `−${(wf.span_hz / 2000).toFixed(1)}…+${(wf.span_hz / 2000).toFixed(1)} kHz`;
+  }
+}
+
+const PALETTE = [
+  [0.00, [6, 10, 18]], [0.22, [16, 46, 62]], [0.45, [26, 110, 104]],
+  [0.70, [84, 196, 150]], [0.88, [214, 226, 140]], [1.00, [250, 240, 196]],
+];
+function pal(v) {
+  v = Math.max(0, Math.min(1, v / 255));
+  for (let i = 1; i < PALETTE.length; i++) {
+    if (v <= PALETTE[i][0]) {
+      const [a, ca] = PALETTE[i - 1], [b, cb] = PALETTE[i];
+      const f = (v - a) / Math.max(b - a, 1e-6);
+      return ca.map((c, k) => Math.round(c + (cb[k] - c) * f));
+    }
+  }
+  return PALETTE[PALETTE.length - 1][1];
+}
+
+function bytes(b64) {
+  const raw = atob(b64), out = new Uint8Array(raw.length);
+  for (let i = 0; i < raw.length; i++) out[i] = raw.charCodeAt(i);
+  return out;
+}
+
+function drawWaterfall(wf) {
+  const cv = $('#wf'), ctx = cv.getContext('2d');
+  cv.width = wf.w; cv.height = wf.h;
+  const u8 = bytes(wf.data);
+  const img = ctx.createImageData(wf.w, wf.h);
+  for (let i = 0; i < u8.length; i++) {
+    const [r, g, b] = pal(u8[i]);
+    img.data[i * 4] = r; img.data[i * 4 + 1] = g; img.data[i * 4 + 2] = b; img.data[i * 4 + 3] = 255;
+  }
+  ctx.putImageData(img, 0, 0);
+}
+
+function drawSpectrum(wf) {
+  const cv = $('#spec'), ctx = cv.getContext('2d');
+  const dpr = Math.min(window.devicePixelRatio || 1, 2);
+  const w = cv.clientWidth || 220, h = cv.clientHeight || 190;
+  cv.width = w * dpr; cv.height = h * dpr;
+  ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+  const u8 = bytes(wf.data), H = wf.h, W = wf.w;
+  const prof = new Float64Array(H);
+  for (let y = 0; y < H; y++) {
+    let s = 0;
+    for (let x = 0; x < W; x++) s += u8[y * W + x];
+    prof[y] = s / W;
+  }
+  const pad = 6, top = 8, bot = 12;
+  const ih = h - top - bot;
+  ctx.clearRect(0, 0, w, h);
+  ctx.strokeStyle = '#1b2530'; ctx.lineWidth = 1;
+  for (let i = 0; i <= 4; i++) {
+    const y = top + (ih * i) / 4;
+    ctx.beginPath(); ctx.moveTo(pad, y); ctx.lineTo(w - pad, y); ctx.stroke();
+  }
+  ctx.beginPath();
+  ctx.moveTo(pad, top + ih);
+  for (let y = 0; y < H; y++) {
+    const x = pad + ((w - 2 * pad) * y) / (H - 1);
+    const v = top + ih * (1 - prof[y] / 255);
+    ctx.lineTo(x, v);
+  }
+  ctx.lineTo(w - pad, top + ih);
+  ctx.closePath();
+  const grd = ctx.createLinearGradient(0, top, 0, top + ih);
+  grd.addColorStop(0, 'rgba(63,224,176,.55)');
+  grd.addColorStop(1, 'rgba(63,224,176,.04)');
+  ctx.fillStyle = grd; ctx.fill();
+  ctx.strokeStyle = '#7df0cd'; ctx.lineWidth = 1.2; ctx.stroke();
+}
+
+function renderReceiver(d) {
+  const rank = x => (x.match ? 4 : 0) + (x.blocks_ok.length && x.blocks_ok.every(Boolean) ? 2 : 0) + (x.header_ok ? 1 : 0);
+  const a = d.attempts.reduce((x, y) => (rank(y) > rank(x) ? y : x), d.attempts[0]);
+  const m = d.sent;
+  const word = $('#verdict');
+  const state = a.match ? ['DECODED', 'ok'] : (a.header_ok ? ['PARTIAL', 'warn'] : ['NO FRAME', 'bad']);
+  word.innerHTML = `<strong class="${state[1]}">${state[0]}</strong>
+    <span class="sub">${esc(m.label)} · ${d.timing.total_s.toFixed(1)} s of airtime ·
+    ${d.channel.toUpperCase()} ${fmtDb(d.snr)} · decoded in ${d.elapsed_s.toFixed(1)} s</span>`;
+
+  $('#rxNote').textContent = a.match
+    ? `${a.bytes} B recovered byte-exact`
+    : (a.header_ok ? `${a.blocks_ok.filter(Boolean).length}/${a.blocks_ok.length} blocks` : 'header lost');
+
+  $('#attempts').innerHTML = d.attempts.map(att => {
+    const on = att === a ? ' on' : '';
+    const chips = (att.blocks_ok.length ? att.blocks_ok : []).map(b =>
+      `<i class="${b ? 'y' : 'n'}"></i>`).join('');
+    return `<div class="attempt${on}">
+      <div class="ahead">
+        <span class="lbl">${esc(att.label)}</span>
+        <span class="badge ${att.header_ok ? 'y' : 'n'}">header ${att.header_ok ? 'ok' : 'lost'}</span>
+        <span class="badge ${att.match ? 'y' : 'n'}">${att.match ? 'byte-exact' : att.bytes + ' B'}</span>
+        <span class="blocks">${chips}</span>
+      </div>
+      <pre class="text${att.decoded ? '' : ' dim'}">${att.decoded ? esc(att.decoded) : '— nothing recovered —'}</pre>
+      <div class="stats">
+        <span>reported <b>${fmtDb(att.reported_snr)}</b></span>
+        <span>sync <b>${fmtDb(att.cfo_hz)}</b></span>
+        <span>header iters <b>${att.iterations}</b></span>
+      </div>
+    </div>`;
+  }).join('');
+}
+
+function fit(cv) {
+  const dpr = Math.min(window.devicePixelRatio || 1, 2);
+  const w = cv.clientWidth || 600, h = cv.clientHeight || 230;
+  cv.width = w * dpr; cv.height = h * dpr;
+  const ctx = cv.getContext('2d');
+  ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+  ctx.clearRect(0, 0, w, h);
+  return { ctx, w, h };
+}
+
+function drawChart() {
+  const p = cur(); if (!p) return;
+  const cv = $('#chart'); if (!cv) return;
+  const { ctx, w, h } = fit(cv);
+  const modes = p.modes;
+  const pad = { l: 46, r: 14, t: 12, b: 24 };
+  const iw = w - pad.l - pad.r, ih = h - pad.t - pad.b;
+  const xs = modes.map(m => m.thr);
+  let x0 = Math.min(...xs) - 1.6, x1 = Math.max(...xs) + 1.6;
+  const ly = v => Math.log10(Math.max(v, 6));
+  const ys = modes.map(m => ly(m.bps));
+  let y0 = Math.floor(Math.min(...ys)) - 0.1, y1 = Math.ceil(Math.max(...ys)) + 0.1;
+  const X = v => pad.l + ((v - x0) / (x1 - x0)) * iw;
+  const Y = v => pad.t + ih - ((ly(v) - y0) / (y1 - y0)) * ih;
+  $('#chartNote').textContent = `${p.label} · ${modes.length} rungs · bps vs measured S/N`;
+
+  ctx.strokeStyle = '#18222c'; ctx.fillStyle = '#54646f';
+  ctx.font = '10px ui-monospace, monospace'; ctx.textAlign = 'right';
+  for (const dec of [10, 100, 1000, 10000]) {
+    if (Math.log10(dec) < y0 || Math.log10(dec) > y1) continue;
+    const y = Y(dec);
+    ctx.beginPath(); ctx.moveTo(pad.l, y); ctx.lineTo(w - pad.r, y); ctx.stroke();
+    ctx.fillText(dec >= 1000 ? (dec / 1000) + 'k' : String(dec), pad.l - 6, y + 3);
+  }
+  ctx.textAlign = 'center';
+  const step = (x1 - x0) > 16 ? 4 : 2;
+  for (let x = Math.ceil(x0 / step) * step; x <= x1; x += step) {
+    ctx.fillText(fmtDb(x), X(x), h - 7);
+  }
+
+  // threshold marker for the current S/N
+  const sx = Math.max(pad.l, Math.min(w - pad.r, X(S.snr)));
+  ctx.strokeStyle = 'rgba(243,182,74,.75)'; ctx.setLineDash([4, 4]); ctx.lineWidth = 1;
+  ctx.beginPath(); ctx.moveTo(sx, pad.t); ctx.lineTo(sx, pad.t + ih); ctx.stroke(); ctx.setLineDash([]);
+  ctx.fillStyle = '#f3b64a'; ctx.textAlign = 'left';
+  ctx.fillText('S/N ' + fmtDb(S.snr), Math.min(sx + 5, w - pad.r - 62), pad.t + 10);
+
+  const sorted = [...modes].sort((a, b) => a.thr - b.thr);
+  ctx.strokeStyle = 'rgba(63,224,176,.22)'; ctx.lineWidth = 1;
+  ctx.beginPath();
+  sorted.forEach((m, i) => { const x = X(m.thr), y = Y(m.bps); i ? ctx.lineTo(x, y) : ctx.moveTo(x, y); });
+  ctx.stroke();
+
+  for (const m of modes) {
+    const x = X(m.thr), y = Y(m.bps);
+    const sel = m.i === S.mcs;
+    const closes = m.thr <= S.snr;
+    ctx.beginPath();
+    ctx.arc(x, y, sel ? 5.5 : 3.4, 0, Math.PI * 2);
+    ctx.fillStyle = closes ? '#3fe0b0' : '#3a4a56';
+    ctx.fill();
+    if (sel) { ctx.strokeStyle = '#d7fff2'; ctx.lineWidth = 1.6; ctx.stroke(); }
+  }
+  const sel = modes[S.mcs];
+  if (sel) {
+    ctx.fillStyle = '#9ff5da'; ctx.textAlign = 'left';
+    ctx.font = '11px ui-monospace, monospace';
+    const tx = Math.min(X(sel.thr) + 9, w - pad.r - 96);
+    ctx.fillText(sel.label, tx, Y(sel.bps) - 7);
+  }
+}
+
+async function runLink() {
+  if (S.busy) return;
+  S.busy = true;
+  const b = $('#lnk'), old = b.textContent;
+  b.disabled = true; b.textContent = 'running the transfer…';
+  $('#err').textContent = '';
+  try {
+    const r = await fetch('/api/link', { method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ profile: S.profile, mcs: S.mcs, text: $('#msg').value.slice(0, 24),
+                             snr: S.snr, channel: S.channel }) });
+    const d = await r.json();
+    if (d.error) throw new Error(d.error);
+    $('#linkstats').innerHTML =
+      `${d.complete ? '<span class="ok">complete</span>' : '<span class="warn">gave up</span>'} · ` +
+      `${d.delivered_bits}/${d.total_bits} bits · ${d.frames} bursts · ${d.retransmissions} retx · ` +
+      `${d.airtime_s} s airtime<br><b>${d.goodput_bps} bps goodput</b> · mcs ${d.mean_mcs} · ` +
+      `${d.elapsed_s} s cpu`;
+  } catch (e) {
+    $('#linkstats').textContent = '';
+    $('#err').textContent = String(e.message || e);
+  } finally {
+    S.busy = false; b.disabled = false; b.textContent = old;
+  }
+}
+
+// wiring
+$('#lnk').addEventListener('click', runLink);
+$('#snr').addEventListener('input', syncAll);
+$('#cfo').addEventListener('input', syncAll);
+$('#msg').addEventListener('input', renderMeta);
+$('#tx').addEventListener('click', transmit);
+document.addEventListener('keydown', e => {
+  if ((e.metaKey || e.ctrlKey) && e.key === 'Enter') { e.preventDefault(); transmit(); }
+});
+window.addEventListener('resize', () => { drawChart(); if (S.result?.waterfall) drawSpectrum(S.result.waterfall); });
+boot();
+</script>
+</body>
+</html>

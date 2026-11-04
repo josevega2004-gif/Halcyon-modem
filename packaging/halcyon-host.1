@@ -1,0 +1,59 @@
+.TH HALCYON-HOST 1 "November 2026" "Halcyon 0.1" "User Commands"
+.SH NAME
+halcyon-host \- run the Halcyon host-mode modem service
+.SH SYNOPSIS
+.B halcyon-host
+[\fIoptions\fR]
+.SH DESCRIPTION
+Starts the two loopback TCP ports that host-mode clients drive: 8300 for
+CR-terminated commands and events, 8301 for the link's byte stream.  PAT and
+other clients that speak this command set connect there; the default addresses
+match what PAT expects.
+.PP
+The service runs in the foreground and stops on SIGINT or SIGTERM.  Bytes a
+client writes to the data port are carried through the modem and returned
+decoded, which makes the path testable without a second station.
+.SH OPTIONS
+.TP
+.BR \-\-host " " \fIADDRESS\fR
+Address to bind.  Default \fB127.0.0.1\fR; keep it on the loopback interface.
+.TP
+.BR \-\-cmd\-port " " \fIPORT\fR
+Command port.  Default \fB8300\fR.
+.TP
+.BR \-\-data\-port " " \fIPORT\fR
+Data port.  Default \fB8301\fR.
+.TP
+.BR \-\-mycall " " \fICALL\fR
+Callsign reported before the client sends \fBMYCALL\fR.  Default \fBN0CALL\fR.
+.TP
+.BR \-\-bandwidth " " \fI500|2300|2750\fR
+Default bandwidth selector.  \fB500\fR selects the robust profile; \fB2300\fR and
+\fB2750\fR select the wide profile.  A \fBBW...\fR command from the client
+overrides it.  Default \fB2300\fR.
+.TP
+.BR \-\-snr " " \fIDB\fR
+Simulated link signal-to-noise ratio.  Default \fB10\fR.
+.TP
+.BR \-\-channel " " \fIawgn|good|moderate|poor\fR
+Simulated channel.  Default \fBawgn\fR.
+.TP
+.B \-\-no\-echo
+Do not return decoded data to the client that wrote it.
+.SH FILES
+.TP
+.I ~/.cache/halcyon/host.log
+Output when started by \fBhalcyon-switch on\fR.
+.SH EXAMPLES
+Run the service for PAT on the ports PAT expects:
+.PP
+.nf
+.RS
+halcyon-host --mycall N0CALL --bandwidth 2300
+.RE
+.fi
+.SH "SEE ALSO"
+.BR halcyon (1),
+.BR halcyon-switch (1)
+.PP
+Setup guide: \fI/usr/share/doc/halcyon/PAT.md\fR.

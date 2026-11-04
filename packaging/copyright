@@ -1,0 +1,30 @@
+Format: https://www.debian.org/doc/packaging-manuals/copyright-format/1.0/
+Upstream-Name: halcyon
+Source: local source tree
+
+Files: *
+Copyright: 2026 Halcyon contributors
+License: GPL-3+
+ This program is free software: you can redistribute it and/or modify it under
+ the terms of the GNU General Public License as published by the Free Software
+ Foundation, either version 3 of the License, or (at your option) any later
+ version.
+ .
+ This program is distributed in the hope that it will be useful, but WITHOUT
+ ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or FITNESS
+ FOR A PARTICULAR PURPOSE.  See the GNU General Public License for more
+ details.
+ .
+ You should have received a copy of the GNU General Public License along with
+ this program.  If not, see <https://www.gnu.org/licenses/>.
+ .
+ On Debian systems, the complete text of the GNU General Public License
+ version 3 can be found in /usr/share/common-licenses/GPL-3.
+
+Comment:
+ Halcyon is written from published specifications: the TCI Protocol 2.1
+ document (ExpertSDR3/TCI) for the TCI framing, the Hermes-Lite 2 protocol
+ pages for HPSDR Protocol 1, and the openHPSDR discovery and start/stop
+ packets.  No third-party source code is included and none was copied in.
+ CREDITS.md lists the protocol documents, the reference programs whose
+ behaviour compatibility was checked against, and the libraries used.
