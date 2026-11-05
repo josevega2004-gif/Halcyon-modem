@@ -6,7 +6,7 @@ across 160–10 m in place of the old 300/1200-baud symbol-rate caps.
 
 Everything here is a working, tested implementation — not a design document.
 Every number in the tables below was produced by the code in this repository
-and can be reproduced with the commands shown.
+and can be reproduced with the commands shown.(Still is a work in progress an need some testing on the air).
 
 ```
 python -m pytest -q                                          # 26 tests
