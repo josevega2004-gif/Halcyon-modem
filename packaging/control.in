@@ -9,7 +9,7 @@ Section: hamradio
 Priority: optional
 Description: open HF data modem (OFDM + LDPC, 2.75 kHz)
  Halcyon is an open high-frequency data modem: OFDM with LDPC coding and
- adaptive speed levels spanning 10 bit/s to about 8 kbit/s, all inside the
+ adaptive speed levels spanning 8.8 bit/s to about 8 kbit/s, all inside the
  2.8 kHz bandwidth that FCC 47 CFR 97.307(f)(3) allows on the amateur bands.
  .
  It brings a browser console for the waterfall, speed ladder and transcript;

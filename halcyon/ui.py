@@ -33,7 +33,7 @@ from .link import Link, LinkConfig
 from .tci import TciClient
 from .host import HostProtocol, HostServer
 from .modem import Modem
-from .ofdm import COMPACT, ROBUST, Phy
+from .ofdm import COMPACT, DEEP, MICRO, MINI, NANO, ROBUST, Phy
 
 ROOT = Path(__file__).resolve().parent
 STATION = ROOT / "ui" / "station.html"   # the terminal: waterfall, speed levels, transcript
@@ -46,6 +46,10 @@ PROFILES: dict[str, tuple[str, str, object]] = {
     "wide": ("Wide", "2.75 kHz", Phy),
     "robust": ("Robust", "562 Hz", lambda: Phy(**ROBUST)),
     "compact": ("Compact", "492 Hz", lambda: Phy(**COMPACT)),
+    "deep": ("Deep test", "375 Hz", lambda: Phy(**DEEP)),
+    "nano": ("Nano test", "234 Hz", lambda: Phy(**NANO)),
+    "mini": ("Mini test", "225 Hz", lambda: Phy(**MINI)),
+    "micro": ("Micro test", "175 Hz", lambda: Phy(**MICRO)),
 }
 
 _MODEMS: dict[str, Modem] = {}
@@ -232,11 +236,6 @@ def _decode(req: dict) -> dict:
 
 def _link(req: dict) -> dict:
     profile = str(req.get("profile", "wide"))
-    if profile == "compact":
-        raise ValueError(
-            "a compact-profile transfer runs at 10-78 bps and takes minutes; "
-            "use the wide or robust geometry"
-        )
     modem = modem_for(profile)
     phy = modem.phy
     table = table_for(phy)

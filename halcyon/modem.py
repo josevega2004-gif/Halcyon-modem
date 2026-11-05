@@ -207,6 +207,7 @@ class Modem:
         blocks_ok: np.ndarray,
         snr_db: float,
         mcs_sugg: int = 0,
+        data_mcs: int = 0,
     ) -> np.ndarray:
         bitmap = 0
         for i, ok in enumerate(blocks_ok[:MAX_BLOCKS]):
@@ -224,7 +225,23 @@ class Modem:
             mcs_sugg=mcs_sugg & 0x0F,
         )
         hdr_syms = self._header_symbols(hdr)
-        return np.concatenate([self.phy.preamble, self.phy.modulate(hdr_syms)])
+        hdr_wave = self.phy.modulate(hdr_syms)
+        # An ACK has no payload whose repetition can protect its header, so it
+        # used to go out with one copy even when the data frame's header was
+        # repeated four times.  At -2 dB the data blocks decoded on every
+        # attempt but the ACK header was lost 8/8, and the link discarded good
+        # data until it gave up.  Match the ACK header to the data rung's own
+        # header protection; the receiver already tries 1/2/4/8 copies.
+        # Narrow profiles already carry 10-12 header symbols, but the ACK still
+        # has no payload repetition behind it: one and two copies both measured
+        # 0/2 ACK headers at -4 dB on the compact profile while data headers
+        # decoded.  Four copies is the control-frame floor there; wide high-rate
+        # frames keep their single copy.
+        min_rep = 4 if int(getattr(self.phy, "header_syms", 2)) >= 4 else 1
+        rep = max(min_rep, header_repeat(mcs(data_mcs, self.phy), self.phy))
+        if rep > 1:
+            hdr_wave = np.tile(hdr_wave, rep)
+        return np.concatenate([self.phy.preamble, hdr_wave])
 
     # -------------------------------------------------------------------- receive
     def receive(self, rx: np.ndarray, prior: list | None = None) -> RxResult:

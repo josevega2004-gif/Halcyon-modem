@@ -96,6 +96,60 @@ COMPACT = {
     "profile": "compact",
 }
 
+# 375 Hz test geometry: 16 carriers, which is exactly the 16 tones the low-speed
+# payload uses.  The header needs 14 symbols because only 12 carriers carry data
+# after the pilot comb, but the payload is the same 16-FSK shape as COMPACT.
+# Narrowing the band from 492 Hz to 375 Hz is worth 1.18 dB at a fixed noise
+# density, and measured 600-byte links reflect that shift: 55.2 bps at -8 dB and
+# 27.0 bps at -10 dB.  Kept as a separate profile so the established 492 Hz
+# thresholds and results remain valid.
+DEEP = {
+    "bin_lo": 11,
+    "bin_hi": 26,
+    "header_syms": 14,
+    "syms_per_block": 12,
+    "profile": "deep",
+}
+
+# 250 Hz-class test geometry: 10 carriers over 234 Hz.  8-FSK fits these tones
+# without changing the 512-point FFT or the 23.4 Hz spacing; 16-FSK cannot,
+# because sixteen tones alone occupy 375 Hz.  This is deliberately a slower
+# bandwidth experiment, not a production default.
+NANO = {
+    "bin_lo": 11,
+    "bin_hi": 20,
+    "header_syms": 22,
+    "syms_per_block": 12,
+    "profile": "nano",
+}
+
+# Two selected points from the 100-350 Hz sweep.  They use a 960-point FFT so
+# the carrier spacing is 12.5 Hz and the occupied width is exact.  MICRO is the
+# sensitivity winner (8-FSK, 8.8 bps, about -18.5 dB at 2.7 kHz); MINI is the
+# speed/sensitivity knee (16-FSK, 11.7 bps, about -17.4 dB).  Both use 32-block
+# codewords and 12-symbol payload blocks, which is where those measurements were
+# taken.
+MICRO = {
+    "n_fft": 960,
+    "bin_lo": 11,
+    "bin_hi": 24,
+    "pilot_step": 3,
+    "header_syms": 17,
+    "syms_per_block": 12,
+    "profile": "micro",
+}
+
+MINI = {
+    "n_fft": 960,
+    "bin_lo": 11,
+    "bin_hi": 28,
+    "pilot_step": 4,
+    "header_syms": 12,
+    "syms_per_block": 12,
+    "profile": "mini",
+}
+
+
 @dataclass
 class Phy:
     fs: int = 12000
@@ -284,24 +338,37 @@ class Phy:
         fsd = self.fs / decim
         idx = np.arange(rxd.size)
         best = (-1.0, 0.0, 0)
+        combined = None
         for f in np.arange(-max_cfo_hz, max_cfo_hz + 1e-9, coarse_step_hz):
             y = rxd * np.exp(-2j * np.pi * f * idx / fsd)
             c = np.abs(fftconvolve(y, pred[::-1].conj(), mode="valid"))
+            if combined is None:
+                combined = c.copy()
+            else:
+                np.maximum(combined, c, out=combined)
             i = int(np.argmax(c))
             if c[i] > best[0]:
                 best = (float(c[i]), float(f), i * decim)
-        if best[0] <= 0:
+        if best[0] <= 0 or combined is None:
             return None
-        # --- fine: full-rate search on a window around the coarse peak
-        i0 = best[2]
+        # A frame whose header is repeated has several near-equal correlation
+        # peaks.  Taking the global maximum can lock onto a later copy: a
+        # repeated-header ACK at 0 dB put the maximum at sample 5772, about 40
+        # symbols in, and the receiver never saw the real preamble at 0.  Take
+        # the earliest peak that is at least half the strongest instead.
+        strong = np.nonzero(combined >= 0.5 * best[0])[0]
+        i0 = int(strong[0]) * decim if strong.size else best[2]
+        # --- fine: full-rate search on a window around the earliest peak
         lo = max(0, i0 - 3 * self.sym_len)
         hi = min(rx.size, i0 + 4 * self.sym_len)
         seg = rx[lo:hi]
         if seg.size < pre.size:
             return None
         sidx = np.arange(lo, hi)
-        best_fine = (-1.0, best[1], 0)
-        for f in np.arange(best[1] - coarse_step_hz, best[1] + coarse_step_hz + 1e-9, 1.0):
+        best_fine = (-1.0, 0.0, 0)
+        # Re-search the whole CFO range here.  The coarse winner can belong to
+        # a false peak, so its frequency is not a safe starting point.
+        for f in np.arange(-max_cfo_hz, max_cfo_hz + 1e-9, 1.0):
             y = seg * np.exp(-2j * np.pi * f * sidx / self.fs)
             c = np.abs(fftconvolve(y, pre[::-1].conj(), mode="valid"))
             i = int(np.argmax(c))

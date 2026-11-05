@@ -6,4 +6,4 @@ from .ofdm import Phy
 from .qam import qam
 
 __all__ = ["crc16", "crc16_ok", "LDPCCode", "code_for", "Phy", "qam"]
-__version__ = "0.1.0"
+__version__ = "0.1.1"

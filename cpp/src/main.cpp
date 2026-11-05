@@ -2,16 +2,20 @@
 // Copyright (C) 2026 Halcyon contributors
 // halcyon-modem -- modulate, demodulate and self-test the C++ port.
 
+#include <algorithm>
 #include <chrono>
+#include <cmath>
 #include <cstdio>
 #include <cstdlib>
 #include <iostream>
+#include <random>
 #include <string>
 #include <sys/stat.h>
 #include <unistd.h>
 #include <vector>
 
 #include "halcyon.hpp"
+#include "halcyon_tables.hpp"
 
 namespace {
 
@@ -76,10 +80,17 @@ void usage() {
       "  tx  --mcs N --text S --out F   modulate a frame (complex float32)\n"
       "  rx  --in F                     demodulate a capture, JSON on stdout\n"
       "  selftest                       modulate and decode every rung\n"
+      "  bench --mcs N --snr DB --frames F\n"
+      "                                 AWGN block-error bench (add --fading)\n"
       "\n"
       "options: --data PATH   table file (default: next to the binary,\n"
       "                        /usr/share/halcyon, or cpp/data)\n"
-      "         --seq N       frame sequence number (tx)\n");
+      "         --seq N       frame sequence number (tx)\n"
+      "         --decoder M   sumprod (default), ms, sposd, msosd\n"
+      "         --iters N     payload BP iterations (default 40)\n"
+      "         --osd-flips N OSD order after a failed BP (default 2 when enabled)\n"
+      "         --llr M       channel (per-|H| scaling, default) or flat\n"
+      "         --blocks N    bench payload size in blocks (default 4)\n");
 }
 
 }  // namespace
@@ -96,6 +107,14 @@ int main(int argc, char** argv) {
   int mcs = 4;
   int seq = 0;
   int repeat = 1;
+  int iters = 40;
+  int osd_flips = 2;
+  int blocks = 4;
+  int frames = 10;
+  double snr = 3.0;
+  bool fading = false;
+  std::string decoder = "sumprod";
+  std::string llr_mode = "channel";
 
   for (int i = 2; i < argc; ++i) {
     const std::string key = argv[i];
@@ -114,6 +133,22 @@ int main(int argc, char** argv) {
       seq = std::atoi(argv[++i]);
     } else if (key == "--repeat" && has_val) {
       repeat = std::max(1, std::atoi(argv[++i]));
+    } else if (key == "--decoder" && has_val) {
+      decoder = argv[++i];
+    } else if (key == "--iters" && has_val) {
+      iters = std::max(1, std::atoi(argv[++i]));
+    } else if (key == "--osd-flips" && has_val) {
+      osd_flips = std::max(0, std::atoi(argv[++i]));
+    } else if (key == "--llr" && has_val) {
+      llr_mode = argv[++i];
+    } else if (key == "--blocks" && has_val) {
+      blocks = std::max(1, std::atoi(argv[++i]));
+    } else if (key == "--frames" && has_val) {
+      frames = std::max(1, std::atoi(argv[++i]));
+    } else if (key == "--snr" && has_val) {
+      snr = std::atof(argv[++i]);
+    } else if (key == "--fading") {
+      fading = true;
     } else {
       std::fprintf(stderr, "unknown option: %s\n", key.c_str());
       return 2;
@@ -124,6 +159,17 @@ int main(int argc, char** argv) {
 
   try {
     halcyon::Modem modem(data);
+    halcyon::DecodeConfig cfg;
+    cfg.max_iter = iters;
+    cfg.channel_llr = (llr_mode != "flat");
+    if (decoder == "ms" || decoder == "msosd") cfg.min_sum = true;
+    if (decoder == "sposd" || decoder == "msosd") cfg.osd_flips = osd_flips;
+    if (decoder != "sumprod" && decoder != "ms" && decoder != "sposd" &&
+        decoder != "msosd") {
+      std::fprintf(stderr, "unknown decoder: %s\n", decoder.c_str());
+      return 2;
+    }
+    modem.set_decode(cfg);
 
     if (cmd == "rungs") {
       std::printf("%-3s %-16s %6s %6s %6s %6s %10s\n", "#", "mode", "bps", "n", "k", "rep",
@@ -176,6 +222,65 @@ int main(int argc, char** argv) {
           json_escape(res.payload).c_str(), res.mcs, res.blocks, blocks.c_str(), res.snr_db,
           res.cfo_hz, res.sample_start, res.seq, res.header_iters, ms);
       return res.ok ? 0 : 1;
+    }
+
+    if (cmd == "bench") {
+      if (mcs < 0 || mcs >= modem.rung_count()) {
+        std::fprintf(stderr, "no such rung: %d\n", mcs);
+        return 2;
+      }
+      const auto info = modem.rung(mcs);
+      const int cap = info.k - 16;
+      const int bytes = std::max(0, cap * blocks / 8);
+      std::string payload;
+      payload.reserve(static_cast<size_t>(bytes));
+      for (int i = 0; i < bytes; ++i) {
+        payload.push_back(static_cast<char>('a' + (i * 7) % 26));
+      }
+      std::mt19937 rng(12345);
+      std::normal_distribution<double> nd(0.0, 1.0);
+      int seen = 0, bad = 0, good_frames = 0;
+      double ms_sum = 0.0;
+      for (int f = 0; f < frames; ++f) {
+        auto built = modem.build(payload, mcs, f & 0xFF);
+        auto wave = built.wave;
+        if (fading) {
+          // Two-tap channel: a 0.7 echo eight samples (667 us) behind the
+          // direct path.  Coherence bandwidth ~1.5 kHz, so the 2.75 kHz
+          // signal is genuinely frequency-selective.
+          const halcyon::cpx echo = 0.7 * std::exp(halcyon::cpx(0.0, 1.1));
+          for (size_t i = wave.size(); i-- > 8;) wave[i] += echo * wave[i - 8];
+        }
+        double power = 0.0;
+        for (const auto& v : wave) power += std::norm(v);
+        power /= std::max<size_t>(1, wave.size());
+        // S/N is quoted in the signal's occupied bandwidth (117 carriers at
+        // 23.4375 Hz = 2742.1875 Hz), as halcyon/channel.py does; a sample-rate
+        // variance would read 10*log10(12000/2742) = 6.4 dB too easy.
+        const double bandwidth = 117.0 * (static_cast<double>(halcyon::kFs) / halcyon::kFft);
+        const double noise = power * (halcyon::kFs / bandwidth) /
+                             std::pow(10.0, snr / 10.0);
+        const double sigma = std::sqrt(noise / 2.0);
+        for (auto& v : wave) v += halcyon::cpx(sigma * nd(rng), sigma * nd(rng));
+        const auto t0 = std::chrono::steady_clock::now();
+        const auto res = modem.receive(wave);
+        ms_sum += std::chrono::duration<double, std::milli>(
+                      std::chrono::steady_clock::now() - t0)
+                      .count();
+        for (bool ok : res.blocks_ok) {
+          ++seen;
+          if (!ok) ++bad;
+        }
+        if (res.ok && res.payload == payload) ++good_frames;
+      }
+      std::printf(
+          "{\"mcs\":%d,\"snr\":%.2f,\"fading\":%s,\"decoder\":\"%s\",\"llr\":\"%s\","
+          "\"frames\":%d,\"blocks\":%d,\"bler\":%.4f,\"fer\":%.4f,\"ms\":%.2f}\n",
+          mcs, snr, fading ? "true" : "false", decoder.c_str(), llr_mode.c_str(), frames,
+          seen, seen ? static_cast<double>(bad) / seen : 1.0,
+          frames ? 1.0 - static_cast<double>(good_frames) / frames : 1.0,
+          ms_sum / std::max(1, frames));
+      return bad == 0 ? 0 : 1;
     }
 
     if (cmd == "selftest") {

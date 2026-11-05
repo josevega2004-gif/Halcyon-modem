@@ -240,6 +240,41 @@ COMPACT_TABLE: tuple[MCS, ...] = (
 )
 
 
+# 375 Hz narrow test ladder (``Phy(**DEEP)``): 16 carriers, the same three
+# non-coherent 16-FSK payloads as COMPACT.  The 62/42/21 bps rungs are reused so
+# the only experimental variable is bandwidth; the 10 bps rung is deliberately
+# omitted, as requested.  Thresholds are measured on this geometry by
+# ``python -m halcyon.bench --mode thresholds --profile deep``.
+DEEP_TABLE: tuple[MCS, ...] = (
+    MCS(2, 1 / 4, "16FSK 1/4", 6.4, -5.5, 1, 12, False, "mfsk"),
+    MCS(2, 1 / 2, "16FSK 1/2", 9.4, -3.0, 1, 12, False, "mfsk"),
+    MCS(2, 3 / 4, "16FSK 3/4", 9.6, -1.5, 1, 12, False, "mfsk"),
+)
+
+
+# 250 Hz-class test ladder (``Phy(**NANO)``): 10 carriers over 234 Hz, 8-FSK.
+# The 16-tone alphabet does not fit this width at 23.4 Hz spacing, so the lower
+# alphabet costs one bit per tone and gives two rungs: 15.6 and 31.25 bps.
+NANO_TABLE: tuple[MCS, ...] = (
+    MCS(3, 1 / 4, "8FSK 1/4", 8.0, -4.0, 1, 16, False, "mfsk", 3),
+    MCS(3, 1 / 2, "8FSK 1/2", 8.5, -2.0, 1, 16, False, "mfsk", 3),
+)
+
+
+# Selected narrow points from the 100-350 Hz sweep (``Phy(**MICRO)`` and
+# ``Phy(**MINI)``).  Both use 32-block long codewords.  MICRO's 8-FSK 1/4 rung
+# measured <=10 % block error at -6.5 dB in-band, or about -18.5 dB referred to
+# 2.7 kHz; MINI's 16-FSK 1/4 rung measured the same -6.5 dB in-band, about
+# -17.4 dB at 2.7 kHz, and carries a third more data.
+MICRO_TABLE: tuple[MCS, ...] = (
+    MCS(3, 1 / 4, "8FSK 1/4", 6.0, -6.5, 1, 32, False, "mfsk", 3),
+)
+
+MINI_TABLE: tuple[MCS, ...] = (
+    MCS(4, 1 / 4, "16FSK 1/4", 7.0, -6.5, 1, 32, False, "mfsk", 4),
+)
+
+
 # No rung below 10 bps: the 352 Hz 8-FSK geometry reached 7.8 bps at -7.0 dB
 # (measured; kept in the git history and the notes), but a mode that slow costs
 # a minute of airtime per short message, so the ladder now stops at 10 bps.
@@ -254,6 +289,10 @@ TABLES: dict[str, tuple[MCS, ...]] = {
     "wide": MCS_TABLE,
     "robust": ROBUST_TABLE,
     "compact": COMPACT_TABLE,
+    "deep": DEEP_TABLE,
+    "nano": NANO_TABLE,
+    "micro": MICRO_TABLE,
+    "mini": MINI_TABLE,
 }
 
 

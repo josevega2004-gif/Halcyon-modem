@@ -15,7 +15,9 @@
 #include <cstdlib>
 #include <cstring>
 #include <fstream>
+#include <functional>
 #include <limits>
+#include <numeric>
 #include <stdexcept>
 
 #include "halcyon_tables.hpp"
@@ -198,9 +200,31 @@ struct Code {
     return true;
   }
 
-  // Log-domain sum-product, tanh rule, with a syndrome early exit.
+  using BitCheck = std::function<bool(const std::vector<uint8_t>&)>;
+
+  struct DecodeOpts {
+    int max_iter = 40;
+    bool min_sum = false;
+    double ms_scale = 0.75;
+    int osd_flips = 0;
+    int osd_window = 10;
+  };
+
+  // Log-domain sum-product (tanh rule) or normalised min-sum, with a syndrome
+  // early exit.  If OSD is enabled and belief propagation gives up, order-2
+  // reprocessing re-encodes from the k most reliable columns and flips up to
+  // `osd_flips` of the least reliable information bits; a candidate is only
+  // accepted when its syndrome is clean and the caller's CRC passes.
   bool decode(const std::vector<double>& llr_in, int max_iter, std::vector<uint8_t>& bits,
               int& iters_used) const {
+    DecodeOpts opts;
+    opts.max_iter = max_iter;
+    return decode(llr_in, opts, bits, iters_used, BitCheck());
+  }
+
+  bool decode(const std::vector<double>& llr_in, const DecodeOpts& opts,
+              std::vector<uint8_t>& bits, int& iters_used,
+              const BitCheck& check = BitCheck()) const {
     const int e = static_cast<int>(llr_in.size());
     if (e < n) {
       bits.assign(n, 0);
@@ -213,11 +237,40 @@ struct Code {
     std::vector<double> v2c(ne);
     std::vector<double> logabs(ne);
     bits.assign(n, 0);
+    const int max_iter = std::max(1, opts.max_iter);
     for (int it = 1; it <= max_iter; ++it) {
       for (int i = 0; i < ne; ++i) v2c[i] = post[edge_col[i]] - msg[i];
       for (int r = 0; r < rows; ++r) {
         const int b = row_ptr[r];
         const int en = row_ptr[r + 1];
+        if (opts.min_sum) {
+          // Normalised min-sum: two smallest magnitudes and the sign product
+          // approximate the tanh check-node update in a few operations.
+          double min1 = 1e300, min2 = 1e300;
+          int arg = -1;
+          int negs = 0;
+          for (int p = b; p < en; ++p) {
+            const int i = row_edges[p];
+            const double v = clampd(v2c[i], -60.0, 60.0);
+            if (v < 0.0) ++negs;
+            const double a = std::fabs(v);
+            if (a < min1) {
+              min2 = min1;
+              min1 = a;
+              arg = i;
+            } else if (a < min2) {
+              min2 = a;
+            }
+          }
+          if (min2 > 1e299) min2 = min1;
+          for (int p = b; p < en; ++p) {
+            const int i = row_edges[p];
+            const int neg = (v2c[i] < 0.0) ? 1 : 0;
+            const double sign = ((negs - neg) & 1) ? -1.0 : 1.0;
+            msg[i] = opts.ms_scale * sign * (i == arg ? min2 : min1);
+          }
+          continue;
+        }
         double sum = 0.0;
         int negs = 0;
         for (int p = b; p < en; ++p) {
@@ -243,7 +296,144 @@ struct Code {
       for (int i = 0; i < ne; ++i) post[edge_col[i]] += msg[i];
       for (int c = 0; c < n; ++c) bits[c] = post[c] < 0.0 ? 1 : 0;
       iters_used = it;
-      if (syndrome_ok(bits)) return true;
+      if (syndrome_ok(bits)) {
+        if (!check || check(bits)) return true;
+        // A clean syndrome with a bad CRC is a miscorrection; OSD may still
+        // recover the right word, so stop iterating and fall through to it.
+        break;
+      }
+    }
+    if (opts.osd_flips > 0) {
+      std::vector<uint8_t> cw;
+      if (osd(llr_in, opts.osd_window, opts.osd_flips, cw, check)) {
+        bits = cw;
+        return true;
+      }
+    }
+    return false;
+  }
+
+  // Order-2 ordered-statistics decoding.  H is [A | B]; with the columns
+  // ordered by reliability, B is inverted over GF(2) once and a candidate
+  // codeword is built as [u, B^-1 A u].  Flipping a few of the least reliable
+  // information bits and re-encoding is the order-2 search.
+  bool osd(const std::vector<double>& llr, int window, int max_flips,
+           std::vector<uint8_t>& out, const BitCheck& check) const {
+    if (max_flips <= 0 || rows <= 0 || n <= k) return false;
+    const int W = (rows + 63) / 64;  // 64-bit words per GF(2) row
+    std::vector<uint64_t> H(static_cast<size_t>(rows) * W, 0);
+    for (int r = 0; r < rows; ++r) {
+      for (int p = row_ptr[r]; p < row_ptr[r + 1]; ++p) {
+        const int c = edge_col[row_edges[p]];
+        H[static_cast<size_t>(r) * W + (c >> 6)] |= 1ULL << (c & 63);
+      }
+    }
+
+    std::vector<int> order(n);
+    std::iota(order.begin(), order.end(), 0);
+    std::stable_sort(order.begin(), order.end(), [&](int a, int b) {
+      return std::fabs(llr[a]) > std::fabs(llr[b]);
+    });
+
+    // B^-1, with B the rows x rows block of the least reliable columns.
+    std::vector<uint64_t> B(static_cast<size_t>(rows) * W, 0);
+    std::vector<uint64_t> inv(static_cast<size_t>(rows) * W, 0);
+    for (int r = 0; r < rows; ++r) {
+      inv[static_cast<size_t>(r) * W + (r >> 6)] = 1ULL << (r & 63);
+      for (int c = k; c < n; ++c) {
+        const int col = order[c];
+        if ((H[static_cast<size_t>(r) * W + (col >> 6)] >> (col & 63)) & 1ULL) {
+          B[static_cast<size_t>(r) * W + ((c - k) >> 6)] |= 1ULL << ((c - k) & 63);
+        }
+      }
+    }
+    for (int col = 0; col < rows; ++col) {
+      int piv = -1;
+      for (int r = col; r < rows; ++r) {
+        if ((B[static_cast<size_t>(r) * W + (col >> 6)] >> (col & 63)) & 1ULL) {
+          piv = r;
+          break;
+        }
+      }
+      if (piv < 0) return false;
+      if (piv != col) {
+        for (int w = 0; w < W; ++w) {
+          std::swap(B[static_cast<size_t>(col) * W + w], B[static_cast<size_t>(piv) * W + w]);
+          std::swap(inv[static_cast<size_t>(col) * W + w], inv[static_cast<size_t>(piv) * W + w]);
+        }
+      }
+      for (int r = 0; r < rows; ++r) {
+        if (r == col) continue;
+        if ((B[static_cast<size_t>(r) * W + (col >> 6)] >> (col & 63)) & 1ULL) {
+          for (int w = 0; w < W; ++w) {
+            B[static_cast<size_t>(r) * W + w] ^= B[static_cast<size_t>(col) * W + w];
+            inv[static_cast<size_t>(r) * W + w] ^= inv[static_cast<size_t>(col) * W + w];
+          }
+        }
+      }
+    }
+
+    // A as packed columns, so a candidate's syndrome is a few row XORs.
+    std::vector<uint64_t> A(static_cast<size_t>(k) * W, 0);
+    for (int c = 0; c < k; ++c) {
+      const int col = order[c];
+      for (int r = 0; r < rows; ++r) {
+        if ((H[static_cast<size_t>(r) * W + (col >> 6)] >> (col & 63)) & 1ULL) {
+          A[static_cast<size_t>(c) * W + (r >> 6)] |= 1ULL << (r & 63);
+        }
+      }
+    }
+
+    std::vector<uint8_t> base(k);
+    for (int c = 0; c < k; ++c) base[c] = llr[order[c]] < 0.0 ? 1 : 0;
+    std::vector<uint64_t> s(W), p(W);
+    auto build = [&](const std::vector<uint8_t>& u, std::vector<uint8_t>& cw) {
+      std::fill(s.begin(), s.end(), 0);
+      for (int c = 0; c < k; ++c) {
+        if (!u[c]) continue;
+        for (int w = 0; w < W; ++w) s[w] ^= A[static_cast<size_t>(c) * W + w];
+      }
+      std::fill(p.begin(), p.end(), 0);
+      for (int r = 0; r < rows; ++r) {
+        if ((s[r >> 6] >> (r & 63)) & 1ULL) {
+          for (int w = 0; w < W; ++w) p[w] ^= inv[static_cast<size_t>(r) * W + w];
+        }
+      }
+      cw.assign(n, 0);
+      for (int c = 0; c < k; ++c) cw[order[c]] = u[c];
+      for (int r = 0; r < rows; ++r) cw[order[k + r]] = (p[r >> 6] >> (r & 63)) & 1ULL;
+    };
+    auto accept = [&](const std::vector<uint8_t>& cw) {
+      return syndrome_ok(cw) && (!check || check(cw));
+    };
+
+    std::vector<uint8_t> u = base;
+    std::vector<uint8_t> cw;
+    build(u, cw);
+    if (accept(cw)) {
+      out = cw;
+      return true;
+    }
+    const int lo = std::max(0, k - std::max(1, window));
+    for (int a = lo; a < k; ++a) {
+      u = base;
+      u[a] ^= 1;
+      build(u, cw);
+      if (accept(cw)) {
+        out = cw;
+        return true;
+      }
+      if (max_flips >= 2) {
+        for (int b = a + 1; b < k; ++b) {
+          u[b] ^= 1;
+          build(u, cw);
+          if (accept(cw)) {
+            out = cw;
+            return true;
+          }
+          u[b] ^= 1;
+        }
+      }
     }
     return false;
   }
@@ -467,6 +657,8 @@ struct Modem::Impl {
 
   struct Demod {
     std::vector<cpx> X;
+    std::vector<double> var_c;   // per-cell noise variance after equalisation
+    std::vector<double> hmag2;   // |H|^2 per cell, for the LLR weighting
     double var = 1.0;
     double snr_db = -99.0;
   };
@@ -474,6 +666,7 @@ struct Modem::Impl {
   Demod demodulate(const std::vector<cpx>& rx, int n_syms) const {
     Demod d;
     d.X.assign(static_cast<size_t>(n_syms) * kDataCarriers, cpx(0.0, 0.0));
+    d.hmag2.assign(static_cast<size_t>(n_syms) * kDataCarriers, 0.0);
     std::vector<cpx> Y(static_cast<size_t>(n_syms) * kFft, cpx(0.0, 0.0));
     std::vector<cpx> buf(kFft);
     for (int s = 0; s < n_syms; ++s) {
@@ -526,7 +719,9 @@ struct Modem::Impl {
         const cpx h(interp_at(pilot_bins, re, bin), interp_at(pilot_bins, im, bin));
         const double mag = std::abs(h);
         const cpx denom = mag < 1e-12 ? cpx(1e-12, 0.0) : h;
-        d.X[static_cast<size_t>(s) * kDataCarriers + k] = Y[static_cast<size_t>(s) * kFft + bin] / denom;
+        const size_t at = static_cast<size_t>(s) * kDataCarriers + k;
+        d.X[at] = Y[static_cast<size_t>(s) * kFft + bin] / denom;
+        d.hmag2[at] = mag * mag;
       }
     }
 
@@ -549,6 +744,14 @@ struct Modem::Impl {
     if (nres > 0) var_h /= (1.5 * nres);
     hpow = hpow / std::max(1, n_syms * kPilots);
     d.var = std::max(var_h / (hpow > 0.0 ? hpow : 1.0), 1e-12);
+    // After dividing by H, a cell's noise variance is sigma^2/|H|^2.  A faded
+    // carrier should not carry the same weight as a strong one, so keep the
+    // per-cell variance; the scalar d.var is its average-power reference.
+    d.var_c.resize(d.X.size());
+    for (size_t i = 0; i < d.X.size(); ++i) {
+      const double h2 = std::max(d.hmag2[i], hpow * 1e-3);
+      d.var_c[i] = d.var * hpow / std::max(h2, 1e-12);
+    }
     double post = 0.0;
     for (const cpx& x : d.X) post += std::norm(x);
     post /= std::max<size_t>(1, d.X.size());
@@ -711,6 +914,19 @@ struct Modem::Impl {
     }
     return out;
   }
+
+  std::vector<double> symbols_to_llr(const std::vector<cpx>& X, int bps,
+                                     const std::vector<double>& var) const {
+    Qam q(bps);
+    std::vector<double> out(X.size() * bps);
+    std::vector<double> tmp(bps);
+    for (size_t i = 0; i < X.size(); ++i) {
+      const double v = i < var.size() ? var[i] : 1.0;
+      q.demap(X[i], v, tmp.data());
+      for (int j = 0; j < bps; ++j) out[i * bps + j] = tmp[j];
+    }
+    return out;
+  }
 };
 
 // --------------------------------------------------------------------- Modem
@@ -738,6 +954,14 @@ Modem::RungInfo Modem::rung(int idx) const {
 }
 
 double Modem::sample_rate() const { return kFs; }
+
+void Modem::set_decode(const DecodeConfig& cfg) {
+  decode_cfg_ = cfg;
+  decode_cfg_.max_iter = std::max(1, decode_cfg_.max_iter);
+  decode_cfg_.ms_scale = clampd(decode_cfg_.ms_scale, 0.1, 1.2);
+  decode_cfg_.osd_flips = std::max(0, std::min(2, decode_cfg_.osd_flips));
+  decode_cfg_.osd_window = std::max(1, decode_cfg_.osd_window);
+}
 
 Built Modem::build(const std::string& text, int mcs_i, int seq) const {
   const Impl& im = *impl_;
@@ -838,7 +1062,10 @@ Result Modem::receive(const std::vector<cpx>& rx_in) const {
     }
     std::vector<cpx> seg(rx.begin() + h_off, rx.begin() + h_off + span);
     const Impl::Demod d = im.demodulate(seg, kHeaderSyms * hr);
-    std::vector<double> llr = im.symbols_to_llr(d.X, 2, d.var);
+    // The header gets the same per-carrier weighting as the payload: the
+    // physical noise after equalisation is sigma^2/|H|^2 there too, and a
+    // faded header is exactly what costs a whole frame.
+    std::vector<double> llr = im.symbols_to_llr(d.X, 2, d.var_c);
     if (hr > 1) {
       const size_t per = llr.size() / hr;
       std::vector<double> summed(per, 0.0);
@@ -915,7 +1142,9 @@ Result Modem::receive(const std::vector<cpx>& rx_in) const {
   std::vector<cpx> seg(rx.begin() + p_off, rx.begin() + need);
   const Impl::Demod d = im.demodulate(seg, n_syms);
   res.snr_db = std::isfinite(d.snr_db) ? d.snr_db : res.snr_db;
-  std::vector<double> llr = im.symbols_to_llr(d.X, m.bps, d.var);
+  const std::vector<double> llr = decode_cfg_.channel_llr
+                                      ? im.symbols_to_llr(d.X, m.bps, d.var_c)
+                                      : im.symbols_to_llr(d.X, m.bps, d.var);
 
   const std::vector<int> perm = im.perm_for(res.mcs, res.blocks);
   std::vector<double> flat(llr.size());
@@ -951,7 +1180,23 @@ Result Modem::receive(const std::vector<cpx>& rx_in) const {
       for (auto& v : bits) v = v < 0.0 ? 1 : 0;
     } else {
       int iters = 0;
-      im.codes[res.mcs].decode(block_llr, 40, bits, iters);
+      Code::DecodeOpts dopts;
+      dopts.max_iter = decode_cfg_.max_iter;
+      dopts.min_sum = decode_cfg_.min_sum;
+      dopts.ms_scale = decode_cfg_.ms_scale;
+      dopts.osd_flips = decode_cfg_.osd_flips;
+      dopts.osd_window = decode_cfg_.osd_window;
+      const int cap_bits = cap;
+      auto crc_ok = [&](const std::vector<uint8_t>& cw) {
+        if (static_cast<int>(cw.size()) < m.k) return false;
+        const std::vector<uint8_t> body(cw.begin(), cw.begin() + cap_bits);
+        const std::vector<uint8_t> want = crc16_bits(body);
+        for (int i = 0; i < 16; ++i) {
+          if (cw[cap_bits + i] != want[i]) return false;
+        }
+        return true;
+      };
+      im.codes[res.mcs].decode(block_llr, dopts, bits, iters, crc_ok);
     }
     if (static_cast<int>(bits.size()) < m.k) bits.resize(m.k, 0);
     std::vector<uint8_t> chunk(bits.begin(), bits.begin() + cap);

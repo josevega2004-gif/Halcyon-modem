@@ -10,15 +10,21 @@ from halcyon.ui import _audio, _decode, _waterfall, modes_payload
 
 def test_modes_payload_covers_every_profile_and_rung():
     d = modes_payload()
-    assert [p["id"] for p in d["profiles"]] == ["wide", "robust", "compact"]
+    assert [p["id"] for p in d["profiles"]] == [
+        "wide", "robust", "compact", "deep", "nano", "mini", "micro"
+    ]
     for p in d["profiles"]:
         assert p["modes"], p["id"]
         for m in p["modes"]:
             assert m["bps"] > 0
             assert m["cap_bytes"] > 0
             assert m["max_bytes"] >= m["cap_bytes"]
-    # every rung is at or above the 10 bps floor, in every geometry
-    assert min(m["bps"] for p in d["profiles"] for m in p["modes"]) >= 10
+    # 8.8 bps is the one deliberate close-to-9 rung; every other is >=10.
+    assert min(m["bps"] for p in d["profiles"] for m in p["modes"]) >= 8.8
+    for p in d["profiles"]:
+        for m in p["modes"]:
+            if m["bps"] < 10:
+                assert p["id"] == "micro"
 
 
 def test_waterfall_is_a_time_by_frequency_image():

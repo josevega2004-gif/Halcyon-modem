@@ -142,7 +142,11 @@ class Link:
                 st.snr_reports.append(res.snr_db)
                 suggestion = best_mcs(res.snr_db, self.cfg.margin_db, phy)
                 ack = self.modem.build_ack(
-                    seq, res.blocks_ok, res.snr_db, suggestion if self.cfg.adaptive else mcs_idx
+                    seq,
+                    res.blocks_ok,
+                    res.snr_db,
+                    suggestion if self.cfg.adaptive else mcs_idx,
+                    data_mcs=mcs_idx,
                 )
                 st.airtime_s += ack.size / fs + self.cfg.turnaround_s
                 ack_res = self.modem.receive(self._channel(ack))

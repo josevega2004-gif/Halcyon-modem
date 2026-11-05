@@ -91,6 +91,58 @@ def test_narrow_profile_loopback():
         assert res.payload == data, f"narrow payload failed at mode {idx}"
 
 
+def test_nano_234_hz_loopback():
+    """The 250 Hz-class geometry must frame and decode its 8-FSK payload."""
+    from halcyon.frame import NANO_TABLE
+    from halcyon.ofdm import NANO
+
+    phy = Phy(**NANO)
+    modem = Modem(phy)
+    assert 200.0 < phy.bandwidth_hz < 250.0
+    data = bytes(range(min(chunk_bits(phy, 1) // 8, 24)))
+    tx, _ = modem.build(data, 1, seq=12)
+    res = modem.receive(fast_channel(tx, snr_db=40.0, seed=7))
+    assert res.header_ok
+    assert res.seq == 12
+    assert res.payload == data
+    assert len(NANO_TABLE) == 2
+
+
+def test_selected_micro_and_mini_loopback():
+    """The two selected sweep geometries must frame, sync and decode."""
+    from halcyon.frame import MICRO_TABLE, MINI_TABLE
+    from halcyon.ofdm import MICRO, MINI
+
+    for cfg, table, seq in ((MICRO, MICRO_TABLE, 13), (MINI, MINI_TABLE, 14)):
+        phy = Phy(**cfg)
+        modem = Modem(phy)
+        assert phy.bandwidth_hz in (175.0, 225.0)
+        data = bytes(range(min(chunk_bits(phy, 0) // 8, 24)))
+        tx, _ = modem.build(data, 0, seq=seq)
+        res = modem.receive(fast_channel(tx, snr_db=40.0, seed=8))
+        assert res.header_ok
+        assert res.seq == seq
+        assert res.payload == data
+        assert len(table) == 1
+
+
+def test_deep_375_hz_loopback():
+    """The 375 Hz test geometry must frame and decode its 16-FSK payload."""
+    from halcyon.frame import DEEP_TABLE
+    from halcyon.ofdm import DEEP
+
+    phy = Phy(**DEEP)
+    modem = Modem(phy)
+    assert phy.bandwidth_hz == 375.0
+    data = bytes(range(min(chunk_bits(phy, 1) // 8, 24)))
+    tx, _ = modem.build(data, 1, seq=11)
+    res = modem.receive(fast_channel(tx, snr_db=40.0, seed=6))
+    assert res.header_ok
+    assert res.seq == 11
+    assert res.payload == data
+    assert len(DEEP_TABLE) == 3
+
+
 def test_compact_convolutional_rung_loopback():
     """The Viterbi rung must frame, sync and decode through the real chain."""
     from halcyon.frame import COMPACT_TABLE, block_sizes, chunk_bits

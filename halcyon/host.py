@@ -40,32 +40,59 @@ import numpy as np
 from .channel import make_channel
 from .frame import MAX_BLOCKS, chunk_bits, table_for
 from .modem import Modem
-from .ofdm import ROBUST, Phy
+from .ofdm import COMPACT, DEEP, MICRO, MINI, NANO, ROBUST, Phy
 
 VERSION = "Halcyon 0.1 host mode"
 CMD_PORT = 8300
 DATA_PORT = 8301
 HEARTBEAT_S = 15.0
+# The channel model quotes S/N in this passband, as operators do.  A narrow
+# receiver sees a higher in-band S/N at the same noise density; thresholds in
+# the compact/robust tables are already in-band values.
+REFERENCE_BW_HZ = 2742.1875
 
 
-def geometry_for(bandwidth: int) -> tuple[str, Phy]:
+def geometry_for(bandwidth: int, snr_db: float | None = None) -> tuple[str, Phy]:
     """The client's bandwidth selector -> a Halcyon geometry.
 
-    500 Hz maps to the robust profile.  2300 and 2750 both map to the wide
-    profile, whose occupied bandwidth is 2.74 kHz -- slightly wider than the
-    2300 Hz setting the selector asks for, which is the one honest mismatch in
-    this mapping.
+    500 Hz uses compact, the 492 Hz low-speed ladder, matching the 500 Hz-class
+    default xara uses.  At -4 dB and below, use the 375 Hz deep test geometry:
+    it measured 55.2 bps against 36.5 bps at -8 dB and still fits the 500 Hz
+    class.  At -12 dB use the 234 Hz nano geometry instead; its 16 bps rung
+    measured 11.4 bps against 6.6 bps for the 21 bps deep rung.  The selected
+    sweep profiles are the deeper fallbacks: 225 Hz mini (16-FSK, 11.7 bps) from
+    -15.5 dB, and 175 Hz micro (8-FSK, 8.8 bps) from -16.5 dB.  Those are the
+    short-frame limits measured in the host, not the six-block bench thresholds;
+    below -16.5 dB neither new profile has a reliable one-block frame yet.  At
+    ordinary S/N 2300 and 2750 map to the wide profile, whose occupied bandwidth
+    is 2.74 kHz -- slightly wider than the 2300 Hz setting the selector asks for,
+    which is the one honest mismatch in this mapping.
     """
+    if snr_db is not None and snr_db <= -16.5:
+        return "micro", Phy(**MICRO)
+    if snr_db is not None and snr_db <= -15.5:
+        return "mini", Phy(**MINI)
+    if snr_db is not None and snr_db <= -12.0:
+        return "nano", Phy(**NANO)
+    if snr_db is not None and snr_db <= -4.0:
+        return "deep", Phy(**DEEP)
     if int(bandwidth) <= 500:
-        return "robust", Phy(**ROBUST)
+        return "compact", Phy(**COMPACT)
     return "wide", Phy()
 
 
 def pick_mcs(phy: Phy, snr: float) -> int:
-    """Highest rung with 3 dB of margin at this S/N."""
+    """Highest rung with 3 dB of margin at this channel S/N.
+
+    ``snr`` is referred to the 2.7 kHz channel, but each ladder's thresholds are
+    measured in its own band.  Convert first: at a fixed noise density the 492 Hz
+    receiver sees 7.5 dB more S/N than the wide one, which is exactly the margin
+    that lets its 21/42 bps rungs work at -8 dB.
+    """
+    in_band = snr + 10.0 * float(np.log10(REFERENCE_BW_HZ / phy.bandwidth_hz))
     best = 0
     for i, m in enumerate(table_for(phy)):
-        if snr - 3.0 >= m.snr_channel:
+        if in_band - 3.0 >= m.snr_channel:
             best = i
     return best
 
@@ -112,13 +139,9 @@ class HostProtocol:
                 pass
 
     def modem(self) -> Modem:
-        if self._modem is None:
-            _, phy = geometry_for(self.state.bandwidth)
+        _, phy = geometry_for(self.state.bandwidth, self.snr)
+        if self._modem is None or self._modem.phy.profile != phy.profile:
             self._modem = Modem(phy)
-        else:
-            _, phy = geometry_for(self.state.bandwidth)
-            if self._modem.phy.bandwidth_hz != phy.bandwidth_hz:
-                self._modem = Modem(phy)
         return self._modem
 
     # -- command handling --------------------------------------------------
@@ -232,7 +255,7 @@ class HostProtocol:
             tx, _ = modem.build(chunk, idx, seq=0)
             ch = make_channel(
                 self.channel, self.snr, seed=(len(chunk) * 31 + start) & 0x7FFFFFFF,
-                bandwidth_hz=phy.bandwidth_hz,
+                bandwidth_hz=REFERENCE_BW_HZ,
             )
             res = modem.receive(ch(tx))
             self.state.last_sn = round(float(res.snr_db), 1) if res.header_ok else None

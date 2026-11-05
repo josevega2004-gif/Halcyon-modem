@@ -22,7 +22,7 @@ from .channel import make_channel
 from .frame import MCS_TABLE, chunk_bits, mcs, table_for
 from .link import Link, LinkConfig
 from .modem import Modem
-from .ofdm import COMPACT, NARROW, ROBUST, Phy
+from .ofdm import COMPACT, DEEP, MICRO, MINI, NANO, NARROW, ROBUST, Phy
 
 # Geometry per profile: the thresholds travel with the layout, because a narrow
 # emission collects less noise and its S/N axis means something different.
@@ -30,11 +30,19 @@ PROFILES = {
     "wide": Phy,
     "robust": lambda: Phy(**ROBUST),
     "compact": lambda: Phy(**COMPACT),
+    "deep": lambda: Phy(**DEEP),
+    "nano": lambda: Phy(**NANO),
+    "micro": lambda: Phy(**MICRO),
+    "mini": lambda: Phy(**MINI),
 }
 _TABLE_NAMES = {
     "wide": "MCS_TABLE",
     "robust": "ROBUST_TABLE",
     "compact": "COMPACT_TABLE",
+    "deep": "DEEP_TABLE",
+    "nano": "NANO_TABLE",
+    "micro": "MICRO_TABLE",
+    "mini": "MINI_TABLE",
 }
 
 # Occupied bandwidth: 117 carriers at 23.4375 Hz = 2742 Hz, which stays under
@@ -373,18 +381,23 @@ def rate_html(rows: list[dict]) -> str:
     return "\n".join(out)
 
 
-def thresholds_table(rows: list[dict], kind: str) -> str:
+def thresholds_table(rows: list[dict], kind: str, phy: Phy | None = None) -> str:
+    bw = "--" if phy is None else f"{phy.bandwidth_hz:.0f} Hz"
     out = [
         f"Measured payload thresholds, `{kind}` channel, block error rate <= 10 %.",
         "",
-        "| MCS | mode | info rate | channel S/N | Eb/N0 | receiver S/N |",
-        "|----:|------|----------:|------------:|------:|-------------:|",
+        f"Geometry bandwidth: **{bw}**.",
+        "",
+        "| MCS | mode | info rate | bandwidth | channel S/N | Eb/N0 | receiver S/N |",
+        "|----:|------|----------:|----------:|------------:|------:|-------------:|",
     ]
     for r in rows:
         t = "--" if r["threshold_db"] is None else f'{r["threshold_db"]:.1f} dB'
         e = "--" if r.get("ebn0_db") is None else f'{r["ebn0_db"]:.1f} dB'
         rep = "--" if r["threshold_reported"] is None else f'{r["threshold_reported"]:.1f} dB'
-        out.append(f'| {r["mcs"]} | {r["label"]} | {r["bps"]} bps | {t} | {e} | {rep} |')
+        out.append(
+            f'| {r["mcs"]} | {r["label"]} | {r["bps"]} bps | {bw} | {t} | {e} | {rep} |'
+        )
     return "\n".join(out)
 
 
@@ -411,7 +424,9 @@ def main() -> None:
     )
     ap.add_argument("--channel", default="awgn", choices=["awgn", "good", "moderate", "poor"])
     ap.add_argument(
-        "--profile", choices=["wide", "robust", "compact"], default="wide"
+        "--profile",
+        choices=["wide", "robust", "compact", "deep", "nano", "micro", "mini"],
+        default="wide",
     )
     ap.add_argument("--half", type=float, default=3.5, help="threshold search half-width, dB")
     ap.add_argument("--frames", type=int, default=4, help="frames per threshold point")
@@ -430,7 +445,7 @@ def main() -> None:
             f"({phy.active.size} carriers, {phy.bandwidth_hz:.0f} Hz)"
         )
         rows = measure_thresholds(args.channel, args.frames, half=args.half, phy=phy)
-        table = thresholds_table(rows, args.channel)
+        table = thresholds_table(rows, args.channel, phy)
         # Keep the wide profile's historical filenames; a second profile must not
         # overwrite them.
         stem = f"thresholds_{args.channel}" + (

@@ -32,6 +32,43 @@ def test_bandwidth_selects_a_geometry_and_rebuilds_the_modem():
     p.handle("BW500")
     assert p.state.bandwidth == 500
     assert p.modem().phy.bandwidth_hz < 1000, "the 500 Hz setting must be a narrow geometry"
+    assert p.modem().phy.profile == "compact", "500 Hz is the low-speed 492 Hz ladder"
+
+
+def test_500_hz_at_low_snr_switches_to_deep_and_carries():
+    p, _ = make(snr=-8.0)
+    p.handle("MYCALL K1ABC")
+    p.handle("CONNECT K1ABC W7ABC")
+    p.handle("BW500")
+    assert p.modem().phy.profile == "deep"
+    data = b"low snr narrow path"
+    assert p.carry(data) == data
+
+
+def test_low_snr_uses_375_hz_even_when_the_client_asked_for_wide():
+    p, _ = make(snr=-8.0)
+    p.handle("BW2750")
+    assert p.modem().phy.profile == "deep"
+    assert p.modem().phy.bandwidth_hz < 400.0
+
+
+def test_very_low_snr_uses_234_hz():
+    p, _ = make(snr=-12.0)
+    p.handle("BW500")
+    assert p.modem().phy.profile == "nano"
+    assert 200.0 < p.modem().phy.bandwidth_hz < 250.0
+
+
+def test_selected_sweep_profiles_are_host_defaults():
+    p, _ = make(snr=-15.5)
+    p.handle("BW500")
+    assert p.modem().phy.profile == "mini"
+    assert 220.0 < p.modem().phy.bandwidth_hz < 230.0
+
+    p, _ = make(snr=-16.5)
+    p.handle("BW500")
+    assert p.modem().phy.profile == "micro"
+    assert 170.0 < p.modem().phy.bandwidth_hz < 180.0
 
 
 def test_version_identifies_halcyon_rather_than_another_modem():

@@ -156,6 +156,7 @@ make -C cpp                         # builds cpp/build/halcyon-modem
 ./cpp/build/halcyon-modem selftest  # modulate + decode every rung
 ./cpp/build/halcyon-modem tx --mcs 4 --text "test de halcyon k" --out frame.f32
 ./cpp/build/halcyon-modem rx --in frame.f32
+./cpp/build/halcyon-modem bench --mcs 4 --snr 2 --frames 20 --fading
 python3 cpp/tests/interop.py        # both directions, sample identity, AWGN
 ```
 
@@ -164,6 +165,18 @@ pilot tracking, sync over ±90 Hz in two stages, all 17 wide rungs including
 repetition and block multiplication, LDPC encoding and log-domain sum-product
 decoding, Gray QAM to 256QAM with max-log LLRs, header framing with CRC-16,
 interleaving, and the truncated/late-acquisition capture handling.
+
+LLRs are scaled per cell by `1/|H|^2` for the header and the payload, so faded
+carriers are trusted less than strong ones (`--llr flat` restores the old scalar
+variance for the payload). On a two-tap 667 us channel this holds 0 % block and
+frame errors at 8 dB where the flat payload path still has 25 % block errors,
+and it also removed the header losses the scalar path had in fading. The
+receiver can also run normalised min-sum (`--decoder ms`) and order-2 OSD with
+CRC acceptance (`--decoder sposd` or `msosd`). Measured on the same blocks,
+neither beats 40-iteration sum-product: 10-iteration min-sum has 95 % block
+errors against 45 % at 2 dB, and OSD-2 recovered none of 68 failed blocks.
+Those remain opt-in; the defaults are the measured best, and the numbers and
+bench method are in `results/cpp_hybrid_decoder.md`.
 
 **Not ported:** the robust (562 Hz) and compact (492 Hz) geometries — including
 the non-coherent 16-FSK path — plus the ARQ link layer, the host-mode service, TCI, HL2,
@@ -275,9 +288,9 @@ administrations impose 2.7 kHz or tighter limits, and some restrict which emissi
 * Systematic LDPC with staircase parity: linear-time encoding, no singular
   parity matrices, sum-product decoding with syndrome early exit. Code graphs
   are grown PEG-style and verified **4-cycle-free**.
-* 25 measured modes across three band geometries — 2.74 kHz, 562 Hz and 492 Hz
-  — from **10 bps to 12 889 bps** raw (16-FSK at the bottom, 256-QAM 8/9 at
-  the top),
+* 33 measured modes across seven band geometries — 2.74 kHz, 562 Hz, 492 Hz,
+  375 Hz deep, 234 Hz nano, 225 Hz mini and 175 Hz micro — from **8.8 bps to
+  12 889 bps** raw (8-FSK at the bottom, 256-QAM 8/9 at the top),
   each with a measured S/N threshold, spaced about 2 dB apart across the
   range so rate control always has a rung in reach. The bottom three are built by
   making the *codeword* longer, not the emission narrower, which is the one trick
@@ -448,6 +461,44 @@ from the fast modes.
 | 16FSK 3/4 | 62 bps | **−2.5 dB** | 6.5 dB | **−10.0 dB** |
 | BPSK 1/4 L2 | 78 bps | +1.0 dB | 9.0 dB | −6.5 dB |
 
+At 600 bytes, with S/N referred to 2.7 kHz as in the rest of this README, the
+compact link closes at **55.5 bps at −6 dB**, **36.5 bps at −8 dB**, and
+**5.9 bps at −12 dB**.  The −6 and −8 runs use the 62 and 42 bps 16-FSK rungs;
+the −12 run uses the 21 bps rung and spends 11 frames on ACKs and headers.  The
+10 bps rung is not needed for any of them.  This is the narrow-geometry answer
+to the negative-SNR problem: at a fixed noise density the 492 Hz receiver sees
+7.5 dB more S/N than the 2.74 kHz one, and non-coherent 16-FSK needs no channel
+estimate.
+
+A separate 375 Hz test geometry (`Phy(**DEEP)`) narrows the same 16-FSK rungs.
+The bandwidth column is explicit because that is the experimental variable:
+
+| geometry | bandwidth | −8 dB | −10 dB | −12 dB |
+|---|---:|---:|---:|---:|
+| compact | 492 Hz | 36.5 bps | -- | 5.9 bps |
+| deep test | 375 Hz | **55.2 bps** | **27.0 bps** | 6.6 bps |
+| nano test | 234 Hz | 27.0 bps | 12.8 bps | **11.4 bps** |
+
+At −8 dB the 375 Hz geometry buys 18.7 bps over compact; at −10 dB it still
+doubles the 234 Hz result.  At −12 dB the 234 Hz geometry wins because its
+16 bps 8-FSK rung needs less signal than the 21 bps 16-FSK rung, even though it
+is the slowest option.  The 100–350 Hz sweep then selected two more points:
+**micro** (175 Hz, 8-FSK 1/4, 8.8 bps, about −18.5 dB at 2.7 kHz) for maximum
+sensitivity, and **mini** (225 Hz, 16-FSK 1/4, 11.7 bps, about −17.4 dB) as the
+speed/sensitivity knee.  Both are host defaults now: `mini` from −15.5 dB and
+`micro` from −16.5 dB, the measured short-frame limits.  The host ladder is
+compact at normal S/N, 375 Hz from −4 dB, 234 Hz from −12 dB, 225 Hz from
+−15.5 dB and 175 Hz from −16.5 dB.  That is the same default xara uses: 500 Hz-
+class bandwidth for low speeds, narrowing further when the path needs it.
+
+| selected geometry | bandwidth | mode | rate | 2.7 kHz threshold |
+|---|---:|---|---:|---:|
+| mini | 225 Hz | 16FSK 1/4 | 11.7 bps | −17.4 dB |
+| micro | 175 Hz | 8FSK 1/4 | 8.8 bps | −18.5 dB |
+
+The thresholds are the measured ≤10 % block-error points; the full sweep and the
+4-FSK control are in `results/narrow_sweep.md`.
+
 The V9 rung is the same 16-FSK 1/2 shape with the K=9 convolutional code and
 Viterbi decoding instead of the LDPC. Through the full chain it reaches 10 %
 block error about 0.3 dB earlier (8.3 % against 22.2 % at −4.5 dB, and 44.4 %
@@ -476,14 +527,15 @@ the previously broken (n, k) pairs decodes with **0 % error** at 5 dB Eb/N0. Tha
 fix also improved the bottom of the wide ladder by half a decibel (227 bps now
 reaches −2.5 dB rather than −3.5).
 
-### There is no sub-10 bps rung (the 352 Hz profile is retired)
+### The slowest rung is 8.8 bps (the 352 Hz profile stays retired)
 
 An earlier build carried a 352 Hz profile with 8-FSK at **7.8 bps, measured at
-−7.0 dB** (−15.9 dB referred to 2.74 kHz) — the most sensitive thing this modem
-has ever had, and the measurement that proved the frame-loss floor was an
-acquisition bug rather than a coding one. It is deliberately not shipped: at
-that rate a short message costs about a minute of airtime, so **10 bps is the
-floor** and the slowest shipped rung is the 492 Hz 16-FSK 1/4 r2 rung below.
+−7.0 dB** (−15.9 dB referred to 2.74 kHz) — the measurement that proved the
+frame-loss floor was an acquisition bug rather than a coding one. It is
+deliberately not shipped: the 175 Hz micro profile reaches 8.8 bps with a more
+usable frame, while the 352 Hz point is slower without being more sensitive.
+At these rates a short message still costs about a minute of airtime, so 8.8 bps
+is the floor and the slowest shipped rung is the 175 Hz 8-FSK micro rung.
 
 That earlier note claimed 1.45 dB was recoverable here by narrowing the frame
 to the 352 Hz the 16-FSK payload occupies. **It is not, and the measurement

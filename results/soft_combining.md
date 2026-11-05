@@ -16,11 +16,11 @@ airtime, not with a slower rung. Each combining step adds roughly 3 dB of Eb/N0,
 so the gain saturates as retransmissions accumulate — it is a floor-lifter for
 links that would otherwise not close at all, not a substitute for a good path.
 
-## It does not fix the ACK path (measured, unresolved)
+## The ACK path is the floor on the 10.4 bps rung
 
 The combining benefit is real at the modem and it is wired into the link, but a
-link still cannot complete at these S/Ns, and the reason is the acknowledgement,
-not the payload. At −7.4 dB channel S/N a 32-byte transfer decoded 2/2 blocks on
+link on this rung still cannot complete at these own-band S/Ns, and the reason
+is the acknowledgement, not the payload. At −7.4 dB channel S/N a 32-byte transfer decoded 2/2 blocks on
 2 of 3 bursts once the previous LLRs were added, while **every ACK was lost**, so
 the sender never learned and the transfer ended with 0 of 256 bits delivered.
 
@@ -30,14 +30,17 @@ Diagnosed directly on the ACK waveform (12-symbol rate-1/4 header, no payload):
 |---:|---|
 | −7.4 dB | 0 / 4 |
 | −6.0 dB | 0 / 4 |
-| −4.0 dB | 0 / 4 |
+| −4.0 dB | **2 / 4** |
 | 0.0 dB | 4 / 4 |
 
-Repeating the ACK header twice — mirroring the data frame's own header repetition —
-did not move that curve (still 0/4 at −4.0 dB), which rules out coding and points
-at acquisition/CFO estimation on a burst this short: the same 24-symbol header
-decodes at −7.4 dB when it is part of a full-length data frame. That is an open
-defect, and until it is fixed the effective floor of a link is set by its ACKs.
+A four-copy ACK header, matching the narrow-profile control floor, now decodes
+2/4 at −4.0 dB instead of 0/4; the earliest-peak synchroniser also stops locking
+onto a later repeated header. It is still 0/4 at −6.0 and −7.4 dB, so the
+effective floor of a link remains set by its ACKs even when the payload blocks
+decode. The remaining gap is control-header margin, not payload coding.  At 42 bps the
+same 492 Hz geometry does complete 600 bytes at -8 dB referred to 2.7 kHz (see
+`xara_comparison.md`); the faster narrow rungs are the practical low-SNR path,
+while this 10.4 bps rung remains control-limited.
 
 ## A second look is not a free win at the edge
 

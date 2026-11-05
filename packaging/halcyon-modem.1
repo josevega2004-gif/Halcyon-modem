@@ -1,4 +1,4 @@
-.TH HALCYON-MODEM 1 "November 2026" "halcyon 0.1.0" "User Commands"
+.TH HALCYON-MODEM 1 "November 2026" "halcyon 0.1.1" "User Commands"
 .SH NAME
 halcyon-modem \- encode and decode Halcyon frames
 .SH SYNOPSIS
@@ -15,6 +15,11 @@ halcyon-modem \- encode and decode Halcyon frames
 .B halcyon-modem
 .B rx
 \fB\-\-in\fR \fIFILE\fR [\fB\-\-repeat\fR \fIN\fR]
+.br
+.B halcyon-modem
+.B bench
+\fB\-\-mcs\fR \fIN\fR \fB\-\-snr\fR \fIDB\fR \fB\-\-frames\fR \fIN\fR
+[\fB\-\-fading\fR]
 .SH DESCRIPTION
 .B halcyon-modem
 is the C++17 implementation of the Halcyon modem core.  It reads and writes
@@ -42,6 +47,11 @@ Encode a frame at speed level \fIN\fR and write the baseband samples to
 Acquire and decode one burst from \fIFILE\fR and print a JSON result.  With
 \fB\-\-repeat\fR \fIN\fR, decode it \fIN\fR times and report the mean
 milliseconds per frame.
+.TP
+.B bench
+Build frames at speed level \fIN\fR, add AWGN at the given channel S/N and
+report block and frame error rates and mean decode time.  \fB\-\-fading\fR
+adds a two-tap 667 us echo for a frequency-selective channel.
 .SH OPTIONS
 .TP
 .BR \-\-data " " \fIPATH\fR
@@ -50,6 +60,33 @@ option halcyon-modem looks beside its own binary, then in
 \fI/usr/share/halcyon/wide.bin\fR, then in \fIcpp/data/wide.bin\fR relative
 to the working directory.  The Debian package installs the table it needs, so
 this is only useful for a build tree or a copy of the tables.
+.TP
+.BR \-\-decoder " " \fIMODE\fR
+Payload decoder: \fBsumprod\fR (default, 40 iterations), \fBms\fR (normalised
+min-sum), \fBsposd\fR (sum-product then order-2 OSD) or \fBmsosd\fR.
+.TP
+.BR \-\-iters " " \fIN\fR
+Belief-propagation iterations for the payload (default 40).
+.TP
+.BR \-\-osd\-flips " " \fIN\fR
+Information-bit flips OSD may try after a failed decode (default 2).
+.TP
+.BR \-\-llr " " \fIMODE\fR
+\fBchannel\fR (default) scales each payload cell by its own \fI1/|H|^2\fR;
+\fBflat\fR uses one variance for the payload.  The header always uses the
+per-carrier weighting.
+.TP
+.BR \-\-blocks " " \fIN\fR
+Bench payload size in blocks (default 4).
+.TP
+.BR \-\-frames " " \fIN\fR
+Bench frames per point (default 10).
+.TP
+.BR \-\-snr " " \fIDB\fR
+Channel S/N for the bench, in the 2.7 kHz occupied bandwidth.
+.TP
+.B \-\-fading
+Add a two-tap frequency-selective channel to the bench.
 .SH ENVIRONMENT
 .TP
 .B HALCYON_DEBUG

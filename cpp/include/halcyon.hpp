@@ -44,6 +44,19 @@ struct Result {
   std::vector<bool> blocks_ok;
 };
 
+// Optional receiver decoder configuration.  The default is the shipped
+// 40-iteration float sum-product path.  The alternatives exist because the
+// hybrid chain (amplitude-scaled LLRs, short min-sum, OSD-2) is worth
+// measuring on the same blocks rather than assuming it helps.
+struct DecodeConfig {
+  int max_iter = 40;
+  bool min_sum = false;
+  double ms_scale = 0.75;  // normalised min-sum check-node weight
+  int osd_flips = 0;       // 0 = off, 2 = order-2 reprocessing after a failed BP
+  int osd_window = 10;     // least-reliable information bits OSD may flip
+  bool channel_llr = true; // scale each cell by 1/|H|^2 instead of one variance
+};
+
 // A frame as the transmitter produced it, for tests and for the CLI.
 struct Built {
   std::vector<cpx> wave;
@@ -65,6 +78,11 @@ class Modem {
   // or undecodable input returns a Result with ok == false.
   Result receive(const std::vector<cpx>& rx) const;
 
+  // Change the payload decoder.  Affects receive() only; the frame header is
+  // always decoded with sum-product, since it must be readable before the
+  // payload rung is known.
+  void set_decode(const DecodeConfig& cfg);
+
   int rung_count() const;
 
   // Rung metadata, for a CLI listing.
@@ -85,6 +103,7 @@ class Modem {
  private:
   struct Impl;
   std::shared_ptr<Impl> impl_;
+  DecodeConfig decode_cfg_;
 };
 
 // Complex float I/O: interleaved little-endian float32 (re, im), the format

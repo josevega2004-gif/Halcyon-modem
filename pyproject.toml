@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "halcyon-modem"
-version = "0.1.0"
+version = "0.1.1"
 description = "Open HF data modem: OFDM, LDPC, adaptive coding"
 authors = [{name = "Halcyon contributors"}]
 license = "GPL-3.0-or-later"
