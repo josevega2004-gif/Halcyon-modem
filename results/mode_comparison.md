@@ -1,8 +1,8 @@
-# Mode, speed and S/N: Halcyon vs xara and aria (VARA core)
+# Mode, speed and S/N: Halcyon vs xara
 
-All S/N figures are channel signal-to-noise ratio in a 2.742 kHz passband, at the per-mode threshold: block error <= 10 % for Halcyon, and the level's decode threshold for xara/aria. Halcyon's wide rows are `results/thresholds_awgn.md`, and the README table and `frame.py`'s wide `snr_channel` use the same values; its narrow profiles are measured in their own bands and converted at fixed noise density by 10 log10(2742.1875 / B). Speeds are mode rates, not measured ARQ link goodput.
+All S/N figures are channel signal-to-noise ratio in a 2.742 kHz passband, at the per-mode threshold: block error <= 10 % for Halcyon, and the level's decode threshold for xara. Halcyon's wide rows are `results/thresholds_awgn.md`, and the README table and `frame.py`'s wide `snr_channel` use the same values; its narrow profiles are measured in their own bands and converted at fixed noise density by 10 log10(2742.1875 / B). Speeds are mode rates, not measured ARQ link goodput.
 
-xara and aria are one ladder, not two: aria is the VARA core, and xara's VARA-compatible level table in the local xara tree (`~/xara/crates/xara-phy/src/hf/level.rs`) is pinned to the core vectors (`~/xara/vectors/levels.json`) by `tests/levels.rs::all_records`, which compares the full records including `thr` and `netbps`. These are the core thresholds, not an independent measurement of xara. The core's reported-S/N axis uses a 2.5 kHz reference (`REF_2500_DB`); the last column subtracts 0.40 dB for 2.742 kHz. The table is therefore the core ladder that xara implements.
+xara's level table in the local xara tree (`~/xara/crates/xara-phy/src/hf/level.rs`) is pinned to its vectors (`~/xara/vectors/levels.json`) by `tests/levels.rs::all_records`, which compares the full records including `thr` and `netbps`. These are the level table's thresholds, not an independent measurement of xara. Its reported-S/N axis uses a 2.5 kHz reference (`REF_2500_DB`); the last column subtracts 0.40 dB for 2.742 kHz. The table is therefore the ladder xara implements.
 
 `mini` and `micro` are bench/console profiles only, not host fallbacks: their 600-byte link goodput measured 1.4–1.9 bps, below the 6 bps floor. The host ladder stops at `nano`.
 
@@ -44,7 +44,7 @@ xara and aria are one ladder, not two: aria is the VARA core, and xara's VARA-co
 | mini | 16FSK 1/4 | 11.7 bps | -17.4 dB |
 | micro | 8FSK 1/4 | 8.8 bps | -18.5 dB |
 
-## xara / aria (VARA core)
+## xara
 
 | Bandwidth | Level | Mode | Speed | S/N (2.5 kHz) | S/N (2.742 kHz) |
 |---:|---:|---|---:|---:|---:|

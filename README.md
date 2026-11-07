@@ -724,7 +724,7 @@ CREDITS.md           protocol documents, reference programs and libraries
 ```
 
 `results/` holds the measured tables, including the decoder comparison above and the
-Halcyon/xara/aria mode, speed and S/N comparison in
+Halcyon/xara mode, speed and S/N comparison in
 [`mode_comparison.md`](results/mode_comparison.md).
 
 ## Credits
