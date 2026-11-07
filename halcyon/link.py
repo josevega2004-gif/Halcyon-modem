@@ -77,18 +77,31 @@ class Link:
     def _window(self, total: int, offset: int, mcs_idx: int, probe: bool = False):
         cap = chunk_bits(self.modem.phy, mcs_idx)
         want = 1 if probe else self.cfg.max_blocks
+        # A one-block frame on a narrow profile is header-dominated: compact's
+        # 12-symbol header across the active carriers is under a third of a
+        # 12-block frame but about three quarters of a one-block one, so a probe
+        # there sits 7 dB below the burst it is meant to predict and fails where
+        # the burst would decode every block.  Probe with the window the link
+        # will actually send instead.
+        if probe and int(getattr(self.modem.phy, "header_syms", 2)) >= 4:
+            want = self.cfg.max_blocks
         n = int(min(want, np.ceil((total - offset) / cap))) or 1
         ranges = [
             (min(offset + i * cap, total), min(offset + (i + 1) * cap, total)) for i in range(n)
         ]
         return cap, n, ranges
 
-    def _step_down(self, mcs_idx: int, reported_db: float | None) -> int:
-        """Pick a level the receiver's report says should work, never upward."""
-        if reported_db is None:
-            return max(0, mcs_idx - 1)
-        cand = best_mcs(reported_db, self.cfg.margin_db, self.modem.phy)
-        return max(0, min(mcs_idx - 1, cand))
+    def _step_down(self, mcs_idx: int) -> int:
+        """Drop exactly one rung.  Repeated failures walk the ladder down.
+
+        The receiver's report is why a step happens, but it does not get to pick
+        the landing.  One rung here is worth 1.5-2.5 dB, and a leap to where the
+        report points lands on a mode whose burst can cost several times the next
+        one down: compact's rung 0 is two copies of a 12x-stretched codeword, so
+        it spends twice the airtime of rung 1 for the same bytes.  One bad report
+        at rung 4 used to put the link straight there.
+        """
+        return max(0, mcs_idx - 1)
 
     def run(self, data: bytes) -> LinkStats:
         phy = self.modem.phy
@@ -129,8 +142,7 @@ class Link:
 
                 if not res.header_ok:
                     st.header_failures += 1
-                    last = st.snr_reports[-1] if st.snr_reports else None
-                    new_mcs = self._step_down(mcs_idx, last)
+                    new_mcs = self._step_down(mcs_idx)
                     if self.cfg.adaptive and new_mcs != mcs_idx:
                         mcs_idx = new_mcs
                         st.mcs_changes += 1
@@ -161,9 +173,8 @@ class Link:
                     nothing_decoded = False  # lost ACK: same blocks go again
 
                 if nothing_decoded and self.cfg.adaptive:
-                    # The burst was no good at this level; reframe at a level the
-                    # receiver's own S/N report supports.
-                    new_mcs = self._step_down(mcs_idx, res.snr_db)
+                    # The burst was no good at this level; reframe one rung down.
+                    new_mcs = self._step_down(mcs_idx)
                     if new_mcs != mcs_idx:
                         mcs_idx = new_mcs
                         st.mcs_changes += 1
@@ -177,6 +188,12 @@ class Link:
                 probe = False
                 if self.cfg.adaptive and st.snr_reports:
                     new_mcs = best_mcs(st.snr_reports[-1], self.cfg.margin_db, phy)
+                    if new_mcs < mcs_idx:
+                        # One rung at a time on the way down.  The estimator reads
+                        # low near the floor, so one reading must not skip several
+                        # rungs and land on a mode whose burst costs far more
+                        # airtime than the next one down; climbing may skip.
+                        new_mcs = mcs_idx - 1
                     if new_mcs != mcs_idx:
                         mcs_idx = new_mcs
                         st.mcs_changes += 1

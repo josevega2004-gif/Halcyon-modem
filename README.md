@@ -9,7 +9,7 @@ Every number in the tables below was produced by the code in this repository
 and can be reproduced with the commands shown.(Still is a work in progress an need some testing on the air).
 
 ```
-python -m pytest -q                                          # 26 tests
+python -m pytest -q                                          # 160 tests
 python -m halcyon.bench --mode thresholds                    # S/N thresholds per mode
 python -m halcyon.bench --mode rate                          # modem rate vs S/N
 python -m halcyon.bench --mode goodput --message-bytes 4000  # end-to-end ARQ goodput
@@ -74,6 +74,11 @@ halcyon-switch on --mycall N0CALL
 pat connect varahf:///N0CALL
 halcyon-switch off
 ```
+
+A 500 Hz start is a hard ceiling, not a fixed profile: the host may step down
+to the 375 Hz deep or 234 Hz nano geometry when the simulated S/N is low, but
+it will not select the 2.74 kHz wide profile even if PAT later announces a
+wider BW.  Start at 2300 or 2750 to allow the wide profile.
 
 `halcyon-switch status` reports what PAT is pointed at and whether the host is
 listening; `halcyon-host` runs the service in the foreground when you would
@@ -309,23 +314,23 @@ From `python -m halcyon.bench --mode thresholds`
 
 | MCS | mode | raw info rate | channel S/N | receiver S/N |
 |----:|------|--------------:|------------:|-------------:|
-| 0 | QPSK 1/4 r4 | 227 bps | −2.5 dB | 7.7 dB |
-| 1 | QPSK 1/8 L4 | 453 bps | −1.5 dB | 6.6 dB |
-| 2 | QPSK 1/4 L2 | 906 bps | −0.5 dB | 6.5 dB |
-| 3 | QPSK 1/3 | 1 208 bps | 1.5 dB | 5.8 dB |
-| 4 | QPSK 1/2 | 1 812 bps | 3.1 dB | 5.9 dB |
-| 5 | QPSK 3/4 | 2 719 bps | 6.2 dB | 7.4 dB |
-| 6 | QPSK 7/8 | 3 172 bps | 7.5 dB | 8.5 dB |
-| 7 | 16QAM 1/2 | 3 625 bps | 8.1 dB | 8.9 dB |
-| 8 | 16QAM 2/3 | 4 833 bps | 10.8 dB | 11.3 dB |
-| 9 | 16QAM 3/4 | 5 438 bps | 11.0 dB | 11.4 dB |
-| 10 | 16QAM 7/8 | 6 344 bps | 14.2 dB | 14.4 dB |
-| 11 | 64QAM 2/3 | 7 250 bps | 16.1 dB | 16.3 dB |
-| 12 | 64QAM 3/4 | 8 156 bps | 16.9 dB | 17.1 dB |
-| 13 | 64QAM 5/6 | 9 062 bps | 18.3 dB | 18.2 dB |
-| 14 | 64QAM 7/8 | 9 516 bps | 19.1 dB | 19.2 dB |
-| 15 | 256QAM 5/6 | 12 083 bps | 24.6 dB | 24.7 dB |
-| 16 | 256QAM 8/9 | 12 889 bps | 25.5 dB | 25.6 dB |
+| 0 | QPSK 1/4 r4 | 227 bps | −3.0 dB | 8.1 dB |
+| 1 | QPSK 1/8 L4 | 453 bps | −2.0 dB | 7.2 dB |
+| 2 | QPSK 1/4 L2 | 906 bps | 0.0 dB | 5.9 dB |
+| 3 | QPSK 1/3 | 1 208 bps | 2.0 dB | 5.8 dB |
+| 4 | QPSK 1/2 | 1 812 bps | 2.6 dB | 5.8 dB |
+| 5 | QPSK 3/4 | 2 719 bps | 5.7 dB | 7.1 dB |
+| 6 | QPSK 7/8 | 3 172 bps | 7.0 dB | 8.1 dB |
+| 7 | 16QAM 1/2 | 3 625 bps | 8.6 dB | 9.3 dB |
+| 8 | 16QAM 2/3 | 4 833 bps | 10.3 dB | 10.9 dB |
+| 9 | 16QAM 3/4 | 5 438 bps | 11.5 dB | 11.8 dB |
+| 10 | 16QAM 7/8 | 6 344 bps | 13.7 dB | 14.0 dB |
+| 11 | 64QAM 2/3 | 7 250 bps | 15.6 dB | 15.8 dB |
+| 12 | 64QAM 3/4 | 8 156 bps | 17.4 dB | 17.5 dB |
+| 13 | 64QAM 5/6 | 9 062 bps | 18.8 dB | 18.7 dB |
+| 14 | 64QAM 7/8 | 9 516 bps | 19.6 dB | 19.7 dB |
+| 15 | 256QAM 5/6 | 12 083 bps | 24.1 dB | 24.2 dB |
+| 16 | 256QAM 8/9 | 12 889 bps | 25.0 dB | 25.1 dB |
 
 "Channel S/N" is the signal-to-noise ratio in the 2 742 Hz passband; "receiver
 S/N" is what the pilot estimator reports. Rate control compares estimator with
@@ -368,9 +373,9 @@ being spent on repeats.
 
 | mode | codeword | symbols/block | info rate | channel S/N | against the rung it replaced |
 |---|---:|---:|---:|---:|---|
-| QPSK 1/4 L2 | 1 392 b, rate ¼ | 8 | 906 bps | −0.5 | 2.7 dB better than 4-symbol QPSK ¼ at the same rate |
-| QPSK 1/8 L4 | 2 784 b, rate ⅛ | 16 | 453 bps | −1.5 | 1.0 dB better than 2× repetition at the same rate |
-| QPSK 1/4 r4 | 696 b × 4 | 16 | 227 bps | −2.5 | repetition still wins at this rate |
+| QPSK 1/4 L2 | 1 392 b, rate ¼ | 8 | 906 bps | 0.0 | 2.7 dB better than 4-symbol QPSK ¼ at the same rate |
+| QPSK 1/8 L4 | 2 784 b, rate ⅛ | 16 | 453 bps | −2.0 | 1.0 dB better than 2× repetition at the same rate |
+| QPSK 1/4 r4 | 696 b × 4 | 16 | 227 bps | −3.0 | repetition still wins at this rate |
 
 Measured, and worth stating plainly:
 
@@ -392,7 +397,8 @@ Measured, and worth stating plainly:
 * **These rungs are not estimator targets.** The pilot estimator is noise-loaded
   at low S/N and reports about 9 dB while the channel sits at −3.5 to +0.5 dB, so
   `best_mcs` skips both kinds of low rung entirely; the link reaches them by
-  stepping down after failures. They are a floor, not a rate-control target.
+  stepping down after failures — one rung at a time, and never by falling onto
+  one from an estimate. They are a floor, not a rate-control target.
 * **What it bought, end to end.** At 0 dB channel S/N a 4 000-byte message now
   completes at 228 bps, and at 5 dB at 812 bps with no retransmissions. Before the
   ladder was extended the 0 dB test completed 0 % of messages. It takes 16
@@ -446,7 +452,7 @@ from the fast modes.
   than assumed.** 16-FSK 1/2 carries 42 bps at −4.0 dB where BPSK 1/8 needed
   0.0 dB for 39 bps — 4 dB more signal for *less* payload — and 16-FSK 3/4 does
   62 bps at −2.5 dB. Coherent BPSK survives only at the top of the ladder, where
-  78 bps for +1.0 dB is still the best rate this bandwidth offers.
+  78 bps for +0.5 dB is still the best rate this bandwidth offers.
 * **16-FSK, detected non-coherently**, for the slowest: one active tone per
   symbol out of 16, Gray-labelled, decided on tone energy alone. No channel
   estimate is needed, so a phase that rotates between pilots costs it nothing —
@@ -454,42 +460,67 @@ from the fast modes.
 
 | mode | info rate | channel S/N (492 Hz) | Eb/N0 | equivalent at 2.74 kHz |
 |---|---:|---:|---:|---:|
-| 16FSK 1/4 r2 | 10 bps | **−7.0 dB** | 9.7 dB | **−14.5 dB** |
-| 16FSK 1/4 | 21 bps | **−5.5 dB** | 8.2 dB | **−13.0 dB** |
+| 16FSK 1/4 r2 | 10 bps | **−7.5 dB** | 9.2 dB | **−15.0 dB** |
+| 16FSK 1/4 | 21 bps | **−6.0 dB** | 7.7 dB | **−13.5 dB** |
 | 16FSK 1/2 | 42 bps | **−4.0 dB** | 6.7 dB | **−11.5 dB** |
 | 16FSK 1/2 V9 | 41 bps | **−4.5 dB** | 6.3 dB | **−12.0 dB** |
 | 16FSK 3/4 | 62 bps | **−2.5 dB** | 6.5 dB | **−10.0 dB** |
-| BPSK 1/4 L2 | 78 bps | +1.0 dB | 9.0 dB | −6.5 dB |
+| BPSK 1/4 L2 | 78 bps | +0.5 dB | 8.5 dB | −7.0 dB |
 
 At 600 bytes, with S/N referred to 2.7 kHz as in the rest of this README, the
-compact link closes at **55.5 bps at −6 dB**, **36.5 bps at −8 dB**, and
-**5.9 bps at −12 dB**.  The −6 and −8 runs use the 62 and 42 bps 16-FSK rungs;
-the −12 run uses the 21 bps rung and spends 11 frames on ACKs and headers.  The
-10 bps rung is not needed for any of them.  This is the narrow-geometry answer
-to the negative-SNR problem: at a fixed noise density the 492 Hz receiver sees
-7.5 dB more S/N than the 2.74 kHz one, and non-coherent 16-FSK needs no channel
-estimate.
+adaptive compact link measures **53.4 bps at −8 dB** (two frames, the BPSK and
+16-FSK 3/4 rungs, no retransmissions), **47.5 bps at −10 dB** (two frames, no
+retransmissions), and **3.4 bps at −12 dB** (19 frames, 24 retransmissions);
+the −12 dB point now closes the message, where it used to miss it.  The
+peak is not the top rung: BPSK 1/4 L2 has the highest nominal rate, but its
+108-byte burst carries a 600-byte message in six bursts, each paying a full ACK
+exchange, where 16-FSK 3/4 carries it in one.  The 21 bps rung appears only at
+−12 dB, and there by stepping down after failures.  These are adaptive-link numbers, one message per point; the
+fixed-rung probe figures this paragraph used to quote (55.5, 36.5 and 5.9 bps)
+are kept in `results/xara_comparison.md`.  This is still the narrow-geometry
+answer to the negative-SNR problem: at a fixed noise density the 492 Hz receiver
+sees 7.5 dB more S/N than the 2.74 kHz one, and non-coherent 16-FSK needs no
+channel estimate.
 
 A separate 375 Hz test geometry (`Phy(**DEEP)`) narrows the same 16-FSK rungs.
 The bandwidth column is explicit because that is the experimental variable:
 
 | geometry | bandwidth | −8 dB | −10 dB | −12 dB |
 |---|---:|---:|---:|---:|
-| compact | 492 Hz | 36.5 bps | -- | 5.9 bps |
-| deep test | 375 Hz | **55.2 bps** | **27.0 bps** | 6.6 bps |
-| nano test | 234 Hz | 27.0 bps | 12.8 bps | **11.4 bps** |
+| compact | 492 Hz | 53.4 bps | 47.5 bps | 3.4 bps |
+| deep test | 375 Hz | **55.2 bps** | **55.2 bps** | 13.8 bps |
+| nano test | 234 Hz | 27.0 bps | 27.0 bps | **20.6 bps** |
 
-At −8 dB the 375 Hz geometry buys 18.7 bps over compact; at −10 dB it still
-doubles the 234 Hz result.  At −12 dB the 234 Hz geometry wins because its
-16 bps 8-FSK rung needs less signal than the 21 bps 16-FSK rung, even though it
-is the slowest option.  The 100–350 Hz sweep then selected two more points:
+On the adaptive link deep leads at −8 and −10 dB (55.2 bps at both, its 62 bps
+rung closing 600 bytes in one twelve-block frame), and nano leads at −12 dB,
+where it closes at 20.6 bps against deep's 13.8 and compact's 3.4: 234 Hz
+collects 3.2 dB
+more in-band S/N than 492 Hz at the same noise density, which is what keeps its
+slower 8-FSK rung alive there.  Nano's −10 dB cell is where the retabulated
+threshold shows up: its 31 bps rung now needs +0.3 dB and the receiver estimates
++0.6, so the 3 dB margin clears and the message lands at 27.0 bps, the same as
+at −8 dB.  With the previous threshold (−2.1 dB reported) the bar was +0.9 dB,
+and that same estimate sent the first window down a rung, costing the cell 6 bps.  The non-coherent rungs no longer report the
+header's S/N, which reads 10-14 dB high because the header fills every active
+carrier where a tone fills one: they report the payload's own tone energies,
+with the per-symbol median — a noise order statistic whose expectation is
+ln 2 times the mean — pinning the noise so the signal falls out of the total,
+referred to the payload power.  With that estimate on the channel's axis the
+ladder thresholds are channel thresholds and the span cap is gone.  The
+one-block probe, whose header was three quarters of the frame, is now sent at
+the burst window instead, which is what lifted compact's −10 dB cell from 14.6
+to 47.5 bps.  All three rows are
+adaptive-link runs, 600 bytes and one message per point, with the channel S/N
+referred to 2.7 kHz.  The 100–350 Hz sweep then selected two more points:
 **micro** (175 Hz, 8-FSK 1/4, 8.8 bps, about −18.5 dB at 2.7 kHz) for maximum
 sensitivity, and **mini** (225 Hz, 16-FSK 1/4, 11.7 bps, about −17.4 dB) as the
-speed/sensitivity knee.  Both are host defaults now: `mini` from −15.5 dB and
-`micro` from −16.5 dB, the measured short-frame limits.  The host ladder is
-compact at normal S/N, 375 Hz from −4 dB, 234 Hz from −12 dB, 225 Hz from
-−15.5 dB and 175 Hz from −16.5 dB.  That is the same default xara uses: 500 Hz-
-class bandwidth for low speeds, narrowing further when the path needs it.
+speed/sensitivity knee.  They remain bench and console profiles, but the host
+does not use them: mini's 600-byte link measured 1.4–1.9 bps and micro is
+slower still, below the 6 bps floor worth operating.  The host ladder is
+compact at normal S/N, 375 Hz from −4 dB and 234 Hz nano from −12 dB; below
+that it has no slower fallback, rather than dropping onto a mode under 6 bps.
+That is the same default xara uses: 500 Hz-class bandwidth for low speeds,
+narrowing further when the path needs it.
 
 | selected geometry | bandwidth | mode | rate | 2.7 kHz threshold |
 |---|---:|---|---:|---:|
@@ -501,14 +532,14 @@ The thresholds are the measured ≤10 % block-error points; the full sweep and t
 
 The V9 rung is the same 16-FSK 1/2 shape with the K=9 convolutional code and
 Viterbi decoding instead of the LDPC. Through the full chain it reaches 10 %
-block error about 0.3 dB earlier (8.3 % against 22.2 % at −4.5 dB, and 44.4 %
-against 66.7 % at −5.0 dB), which is inside the ±0.5 dB uncertainty of the
-36-block points: a rung worth keeping, not a ladder reshuffle.
+block error about 0.5 dB earlier (7.3 % against 11.5 % at −4.5 dB, and 75 %
+against 96.9 % at −5.5 dB), which is inside the ±0.5 dB uncertainty of the
+96-block points: a rung worth keeping, not a ladder reshuffle.
 
 The right-hand column is the honest axis for a narrow mode: at a fixed noise
 density, 492 Hz collects 10·log₁₀(2 742/492) = **7.5 dB less noise** than the
-wide layout, so an in-band S/N of −6.5 dB here is the same thing as −14.0 dB
-referred to 2.74 kHz. That is what puts a 21 bps rung at an absolute signal level
+wide layout,so an in-band S/N of −6.0 dB here is the same thing as −13.5 dB referred to
+2.74 kHz. That is what puts a 21 bps rung at an absolute signal level
 the wide ladder cannot reach; the same payload in coherent BPSK needed about 6 dB
 more signal.
 
@@ -525,7 +556,7 @@ and the effect was a block-error floor that did not move with S/N. `code_for` no
 scales the column weight with the check-to-information ratio, and every one of
 the previously broken (n, k) pairs decodes with **0 % error** at 5 dB Eb/N0. That
 fix also improved the bottom of the wide ladder by half a decibel (227 bps now
-reaches −2.5 dB rather than −3.5).
+reaches −3.0 dB rather than −3.5).
 
 ### The slowest rung is 8.8 bps (the 352 Hz profile stays retired)
 
@@ -556,17 +587,17 @@ Region 1 band plan.
 
 | mode | info rate | channel S/N (562 Hz) | Eb/N0 |
 |---|---:|---:|---:|
-| QPSK 1/3 | 250 bps | 4.9 dB | 8.4 dB |
-| QPSK 3/4 | 562 bps | 5.3 dB | 5.3 dB |
-| 16QAM 1/2 | 750 bps | 8.7 dB | 7.5 dB |
+| QPSK 1/3 | 250 bps | 2.0 dB | 5.5 dB |
+| QPSK 3/4 | 562 bps | 5.5 dB | 5.5 dB |
+| 16QAM 1/2 | 750 bps | 8.5 dB | 7.3 dB |
 
 What it does and does not buy:
 
 * **It is not more sensitive per bit, and the table shows why.** Eb/N0 lands
-  within half a decibel of the wide profile's at QPSK ¾ (5.3 against 5.7 dB), and
-  3.3 dB worse at the lowest rate only because 432-bit blocks are shorter than the
-  wide profile's 696-bit ones. Narrowing an emission creates no
-  coding gain, and any claim otherwise is a bandwidth-reference mix-up.
+  within 0.2 dB of the wide profile's at every rate (5.5 against 5.6 dB at
+  QPSK ⅓, 5.5 against 5.7 at QPSK ¾, 7.3 against 7.4 at 16QAM ½). Narrowing an
+  emission creates no coding gain, and any claim otherwise is a
+  bandwidth-reference mix-up.
 * **It works at a much lower absolute signal.** For a given noise density the
   receiver collects 10·log10(2 742/562) = **6.9 dB less noise**, so the signal
   level at the antenna can be 6.9 dB lower for the same in-band S/N. On a
@@ -575,6 +606,16 @@ What it does and does not buy:
   2.74 kHz; 562 Hz only has to find 562 Hz that is clear.
 * **It is genuinely slow:** 250–750 bps payload, and the header costs 480 ms per
   burst because 18 data carriers need ten header symbols to reach rate 1/4.
+
+At 600 bytes the adaptive link measures **68 bps at its 2.0 dB threshold**
+(S/N in the 562 Hz band, −4.9 dB referred to 2.74 kHz), with 38 block
+retransmissions, and 61 bps a decibel below it; at 0 dB and below it no longer
+completes.
+Above the threshold it climbs to 129 bps at 4 dB, 172 bps at 6 dB and 485 bps
+at 8 dB; `results/goodput_awgn_robust.md` holds the sweep
+(`--mode goodput --profile robust --snr-step 1`).  The threshold is a usable
+operating point rather than a cliff edge, and the retransmission count is what
+it costs.
 
 Two honest limits. Blocks here are 12 symbols, not 4: a 4-symbol block at 18
 carriers is 144 coded bits, and at that length the code has no distance at all
@@ -601,7 +642,14 @@ preamble+header+ACK cost per exchange.
 
 * **Fading is the weak spot.** Measured on a moderate Watterson path
   (0.5–1 Hz Doppler, 1 ms delay, two taps): 62 bps at 16 dB and 33 bps at
-  22 dB, with 0 % of 4 000-byte messages completed. The payload interleaver
+  22 dB, with 0 % of 4 000-byte messages completed. **These figures predate a
+  fix to the channel model.** `fractional_delay` used to shift a burst
+  *circularly*, wrapping its tail onto its start — a free cyclic prefix for the
+  receiver, and a destroyed last block. It is a linear delay now. The two agree
+  on AWGN, where there are no delay taps and nothing above changes, but on this
+  same moderate path an 800-byte transfer measured 83 bps at 22 dB with the
+  wrapping delay against 60 bps with the linear one, so treat the numbers in
+  this section as optimistic until they are re-run. The payload interleaver
   spreads every codeword across every block in the burst, so a fade degrades
   all blocks equally instead of failing a few and letting selective repeat fix
   them; frequency-selective nulls also hurt linear pilot interpolation across
@@ -669,13 +717,15 @@ halcyon/link.py      burst ARQ, selective repeat, rate control
 halcyon/bench.py     thresholds, rate, goodput and compliance measurements
 halcyon/host.py      host-mode service: the two loopback ports PAT dials
 halcyon/switch.py    select Halcyon in PAT, restore the previous modem
-tests/               144 tests: CRC, LDPC, polar, conv, product, QAM, framing, sync, link, host mode
+tests/               tests: CRC, LDPC, polar, conv, product, QAM, framing, sync, link, host mode
 docs/PAT.md          PAT setup guide, shipped with the package
 docs/VARAC.md        VarAC settings guide, shipped with the package
 CREDITS.md           protocol documents, reference programs and libraries
 ```
 
-`results/` holds the measured tables, including the decoder comparison above.
+`results/` holds the measured tables, including the decoder comparison above and the
+Halcyon/xara/aria mode, speed and S/N comparison in
+[`mode_comparison.md`](results/mode_comparison.md).
 
 ## Credits
 

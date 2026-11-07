@@ -25,6 +25,13 @@ HEADER_SYMS = 2
 MAX_BLOCKS = 12
 MAX_PAYLOAD_BITS = (1 << 16) - 1
 
+# Channel S/N is quoted in a 2.75 kHz passband, the way operators quote it.  A
+# narrow geometry collects proportionally less noise at the same noise density,
+# so its own in-band S/N is higher by this ratio -- and the narrow ladders'
+# thresholds are measured on that in-band axis.  One constant, so the conversion
+# happens in one place instead of separately in the host and the link.
+REFERENCE_BW_HZ = 2742.1875
+
 FT_DATA = 0
 FT_ACK = 1
 
@@ -61,8 +68,10 @@ class MCS:
     bps: int          # bits per data carrier
     rate: float       # LDPC code rate
     label: str
-    # S/N (dB) as measured by the receiver's pilot estimator at block FER <= 10 %.
-    # Rate control compares estimator with estimator, so this axis is used there.
+    # S/N (dB) as the receiver reports it at block FER <= 10 %: the pilot estimate
+    # for the QAM rungs, the payload tone-energy estimate (``mfsk.snr_from_tones``)
+    # for the non-coherent ones, which is the same in-band axis.  Rate control
+    # compares estimator with estimator, so this axis is used there.
     snr_min: float
     # The same threshold expressed as channel S/N in the 2.75 kHz band, which is
     # the axis operators quote.  Measured by
@@ -130,34 +139,34 @@ MCS_TABLE: tuple[MCS, ...] = (
     # estimator is noise-loaded at low S/N, so rate control never targets these
     # modes from the estimator (see ``best_mcs``); the link steps down into them
     # after failures instead.
-    MCS(2, 1 / 4, "QPSK 1/4 r4", 7.7, -2.5, 4),
-    MCS(2, 1 / 8, "QPSK 1/8 L4", 6.6, -1.5, 1, 4),
-    MCS(2, 1 / 4, "QPSK 1/4 L2", 6.5, -0.5, 1, 2),
-    MCS(2, 1 / 3, "QPSK 1/3", 5.8, 1.5),
-    MCS(2, 1 / 2, "QPSK 1/2", 5.9, 3.1),
-    MCS(2, 3 / 4, "QPSK 3/4", 7.4, 6.2),
+    MCS(2, 1 / 4, "QPSK 1/4 r4", 8.1, -3.0, 4),
+    MCS(2, 1 / 8, "QPSK 1/8 L4", 7.2, -2.0, 1, 4),
+    MCS(2, 1 / 4, "QPSK 1/4 L2", 5.9, 0.0, 1, 2),
+    MCS(2, 1 / 3, "QPSK 1/3", 5.8, 2.0),
+    MCS(2, 1 / 2, "QPSK 1/2", 5.8, 2.6),
+    MCS(2, 3 / 4, "QPSK 3/4", 7.1, 5.7),
     # Fills the 2.5 dB hole between QPSK 3/4 and 16QAM 1/2: the old ladder
     # charged 2.9 dB for 906 bps there, and part of that was the constellation
-    # change rather than the rate.  At 7.5 dB this carries 3 172 bps where the
+    # change rather than the rate.  At 7.0 dB this carries 3 172 bps where the
     # old ladder carried 2 719.
-    MCS(2, 7 / 8, "QPSK 7/8", 8.5, 7.5),
-    MCS(4, 1 / 2, "16QAM 1/2", 8.9, 8.1),
-    MCS(4, 2 / 3, "16QAM 2/3", 11.3, 10.8),
-    MCS(4, 3 / 4, "16QAM 3/4", 11.4, 11.0),
-    MCS(4, 7 / 8, "16QAM 7/8", 14.4, 14.2),
-    MCS(6, 2 / 3, "64QAM 2/3", 16.3, 16.1),
-    MCS(6, 3 / 4, "64QAM 3/4", 17.1, 16.9),
+    MCS(2, 7 / 8, "QPSK 7/8", 8.1, 7.0),
+    MCS(4, 1 / 2, "16QAM 1/2", 9.3, 8.6),
+    MCS(4, 2 / 3, "16QAM 2/3", 10.9, 10.3),
+    MCS(4, 3 / 4, "16QAM 3/4", 11.8, 11.5),
+    MCS(4, 7 / 8, "16QAM 7/8", 14.0, 13.7),
+    MCS(6, 2 / 3, "64QAM 2/3", 15.8, 15.6),
+    MCS(6, 3 / 4, "64QAM 3/4", 17.5, 17.4),
     # Replaces 256QAM 2/3, which bought +1.6 % rate over 64QAM 7/8 for a whole
     # decibel -- it was never on the frontier.  This sits in the 2.2 dB gap
     # between 64QAM 3/4 and 64QAM 7/8 instead.
-    MCS(6, 5 / 6, "64QAM 5/6", 18.2, 18.3),
-    MCS(6, 7 / 8, "64QAM 7/8", 19.2, 19.1),
-    MCS(8, 5 / 6, "256QAM 5/6", 24.7, 24.6),
+    MCS(6, 5 / 6, "64QAM 5/6", 18.7, 18.8),
+    MCS(6, 7 / 8, "64QAM 7/8", 19.7, 19.6),
+    MCS(8, 5 / 6, "256QAM 5/6", 24.2, 24.1),
     # Rate 8/9 at 256QAM extends the ceiling itself: +6.7 % rate (12 889 bps)
     # for about a decibel of signal, measured at 6 frames.  It is the only way
     # up from here short of a wider band, and 5/6 stays below it because a link
     # should not need the extra decibel when 5/6 already closes.
-    MCS(8, 8 / 9, "256QAM 8/9", 25.6, 25.5),
+    MCS(8, 8 / 9, "256QAM 8/9", 25.1, 25.0),
 )
 
 
@@ -172,9 +181,9 @@ MCS_TABLE: tuple[MCS, ...] = (
 # those (n, k) pairs rather than a property of the geometry.  Fix that and they
 # can come back with measured thresholds.
 ROBUST_TABLE: tuple[MCS, ...] = (
-    MCS(2, 1 / 3, "QPSK 1/3", 6.7, 4.9),
-    MCS(2, 3 / 4, "QPSK 3/4", 7.0, 5.3),
-    MCS(4, 1 / 2, "16QAM 1/2", 9.3, 8.7),
+    MCS(2, 1 / 3, "QPSK 1/3", 5.8, 2.0),
+    MCS(2, 3 / 4, "QPSK 3/4", 7.1, 5.5),
+    MCS(4, 1 / 2, "16QAM 1/2", 9.1, 8.5),
 )
 
 def header_repeat(m: MCS, phy) -> int:
@@ -195,6 +204,29 @@ def header_repeat(m: MCS, phy) -> int:
     return max(1, m.rep) * max(1, m.block_mult)
 
 
+def header_power_db(phy, m: MCS, blocks: int) -> float:
+    """How far a non-coherent frame's mean power sits above its payload's, in dB.
+
+    The receiver's noise is set by the frame's mean power, and the header fills
+    every active carrier where a tone fills one, so the payload pays
+    ``10 log10((h*active + n) / (h + n))`` for the header.  A one-block nano
+    probe carries a 22-symbol header against 64 payload symbols and sits 4 dB
+    below the burst it is meant to predict; that is a property of the probe's
+    shape, not of the channel, so the tone estimate is referred back to the
+    payload power before rate control sees it.  The coherent modes put the same
+    power on header and payload, so they need no referral.
+    """
+    if m.kind != "mfsk":
+        return 0.0
+    spb = int(getattr(phy, "syms_per_block", SYMS_PER_BLOCK))
+    h = int(getattr(phy, "header_syms", HEADER_SYMS)) * header_repeat(m, phy)
+    n = int(blocks) * spb * max(1, m.rep) * max(1, m.block_mult)
+    active = float(max(1, int(np.size(getattr(phy, "active", 1)))))
+    if h + n <= 0:
+        return 0.0
+    return float(10.0 * np.log10((h * active + n) / float(h + n)))
+
+
 # Narrow, low-speed ladder (``Phy(**COMPACT)``): 21 carriers over 492 Hz.  This is
 # the shape a slow level takes -- a narrow emission that fits a 500 Hz gap --
 # with the modulation chosen for the job rather than inherited from the fast modes:
@@ -209,34 +241,34 @@ COMPACT_TABLE: tuple[MCS, ...] = (
     # code at n = 864 measured a 0.33 block-error floor that did not move with
     # S/N or with the LLR scale, so the rung is built the way that measured
     # clean -- send the codeword twice and sum the LLRs.
-    MCS(2, 1 / 4, "16FSK 1/4 r2", 7.0, -7.0, 2, 12, False, "mfsk"),
+    MCS(2, 1 / 4, "16FSK 1/4 r2", -8.6, -7.5, 2, 12, False, "mfsk"),
     # 21 bps.  Every rung here is non-coherent: at these rates the receiver cannot
     # form a channel estimate worth having, and 16-FSK does not need one.
-    MCS(2, 1 / 4, "16FSK 1/4", 8.3, -5.5, 1, 12, False, "mfsk"),
+    MCS(2, 1 / 4, "16FSK 1/4", -6.5, -6.0, 1, 12, False, "mfsk"),
     # The two rungs that replaced coherent BPSK, measured against it: 16-FSK 1/2
     # carries *more* than BPSK 1/8 (42 against 39 bps) for 4.0 dB less signal
     # (-4.0 against 0.0 dB), and 16-FSK 3/4 does 62 bps at -2.5 dB.  BPSK 1/8 was
     # dropped as dominated; the coherent modes were paying for a channel estimate
     # that pilot interpolation cannot deliver at -4 dB.
-    MCS(2, 1 / 2, "16FSK 1/2", 8.7, -4.0, 1, 12, False, "mfsk"),
-    MCS(2, 3 / 4, "16FSK 3/4", 9.6, -2.5, 1, 12, False, "mfsk"),
+    MCS(2, 1 / 2, "16FSK 1/2", -4.0, -4.0, 1, 12, False, "mfsk"),
+    MCS(2, 3 / 4, "16FSK 3/4", -2.2, -2.5, 1, 12, False, "mfsk"),
     # Top rung of the narrow ladder: coherent BPSK still wins on rate, 78 bps, and
     # earns its 3.5 dB over 16-FSK 3/4 by carrying 26 % more.
-    MCS(1, 1 / 4, "BPSK 1/4 L2", 5.5, 1.0, 1, 2),
+    MCS(1, 1 / 4, "BPSK 1/4 L2", 5.7, 0.5, 1, 2),
     # Same 16-FSK 1/2 shape as the rung above it, with the block code replaced by
     # the K=9 convolutional code and Viterbi decoding.  Appended at the end
     # rather than inserted beside its sibling because MCS indices travel in the
     # header and address the published threshold table: a new rung goes at the
     # end so no existing index moves.
     #
-    # Measured through this chain (AWGN, 6 frames x 6 blocks per point): 8.3 %
-    # block error at -4.5 dB against 22.2 % for the LDPC rung, and 44.4 % against
-    # 66.7 % at -5.0 dB.  The 10 % crossing is therefore about 0.3 dB earlier,
+    # Measured through this chain (AWGN, 16 frames x 6 blocks per point): 7.3 %
+    # block error at -4.5 dB against 11.5 % for the LDPC rung, and 75 % against
+    # 96.9 % at -5.5 dB.  The 10 % crossing is therefore about 0.5 dB earlier,
     # less than the 0.5-1 dB the ideal non-coherent comparison promised -- the
-    # pilot estimate, header and sync eat part of it, and 36 blocks per point
+    # pilot estimate, header and sync eat part of it, and 96 blocks per point
     # leaves about +-0.5 dB.  The threshold below is the measured channel S/N;
-    # the reported S/N at that point was 8.3 dB.
-    MCS(2, 1 / 2, "16FSK 1/2 V9", 8.3, -4.5, 1, 12, False, "mfsk", 4, "conv9"),
+    # the reported tone-energy S/N at that point is -4.6 dB.
+    MCS(2, 1 / 2, "16FSK 1/2 V9", -4.6, -4.5, 1, 12, False, "mfsk", 4, "conv9"),
 )
 
 
@@ -246,9 +278,9 @@ COMPACT_TABLE: tuple[MCS, ...] = (
 # omitted, as requested.  Thresholds are measured on this geometry by
 # ``python -m halcyon.bench --mode thresholds --profile deep``.
 DEEP_TABLE: tuple[MCS, ...] = (
-    MCS(2, 1 / 4, "16FSK 1/4", 6.4, -5.5, 1, 12, False, "mfsk"),
-    MCS(2, 1 / 2, "16FSK 1/2", 9.4, -3.0, 1, 12, False, "mfsk"),
-    MCS(2, 3 / 4, "16FSK 3/4", 9.6, -1.5, 1, 12, False, "mfsk"),
+    MCS(2, 1 / 4, "16FSK 1/4", -6.8, -5.0, 1, 12, False, "mfsk"),
+    MCS(2, 1 / 2, "16FSK 1/2", -4.8, -3.5, 1, 12, False, "mfsk"),
+    MCS(2, 3 / 4, "16FSK 3/4", -2.4, -1.5, 1, 12, False, "mfsk"),
 )
 
 
@@ -256,8 +288,8 @@ DEEP_TABLE: tuple[MCS, ...] = (
 # The 16-tone alphabet does not fit this width at 23.4 Hz spacing, so the lower
 # alphabet costs one bit per tone and gives two rungs: 15.6 and 31.25 bps.
 NANO_TABLE: tuple[MCS, ...] = (
-    MCS(3, 1 / 4, "8FSK 1/4", 8.0, -4.0, 1, 16, False, "mfsk", 3),
-    MCS(3, 1 / 2, "8FSK 1/2", 8.5, -2.0, 1, 16, False, "mfsk", 3),
+    MCS(3, 1 / 4, "8FSK 1/4", -5.7, -4.0, 1, 16, False, "mfsk", 3),
+    MCS(3, 1 / 2, "8FSK 1/2", -2.7, -2.0, 1, 16, False, "mfsk", 3),
 )
 
 
@@ -267,11 +299,11 @@ NANO_TABLE: tuple[MCS, ...] = (
 # 2.7 kHz; MINI's 16-FSK 1/4 rung measured the same -6.5 dB in-band, about
 # -17.4 dB at 2.7 kHz, and carries a third more data.
 MICRO_TABLE: tuple[MCS, ...] = (
-    MCS(3, 1 / 4, "8FSK 1/4", 6.0, -6.5, 1, 32, False, "mfsk", 3),
+    MCS(3, 1 / 4, "8FSK 1/4", -6.5, -6.5, 1, 32, False, "mfsk", 3),
 )
 
 MINI_TABLE: tuple[MCS, ...] = (
-    MCS(4, 1 / 4, "16FSK 1/4", 7.0, -6.5, 1, 32, False, "mfsk", 4),
+    MCS(4, 1 / 4, "16FSK 1/4", -6.5, -6.5, 1, 32, False, "mfsk", 4),
 )
 
 
@@ -352,28 +384,103 @@ def payload_capacity(phy, mcs_idx: int, blocks: int) -> int:
     return chunk_bits(phy, mcs_idx) * blocks
 
 
-def best_mcs(snr_db: float, margin_db: float = 1.0, phy=None) -> int:
-    """Highest MCS whose measured threshold sits below the reported SNR.
+def info_rate_bps(phy, mcs_idx: int) -> float:
+    """Raw payload bits per second this rung carries, no ARQ overhead.
 
-    Repetition modes are skipped: their thresholds are measured as *reported* S/N,
-    and the pilot estimator reads high at low S/N, so targeting one from an
-    estimate would buy a slower mode for no reason.  They are a floor the link
-    steps onto after failures, so the fallback here is the slowest ordinary mode.
+    16-FSK carries ``tone_bits`` bits per symbol and one tone per symbol; a QAM
+    payload carries one constellation point per data carrier.  A convolutional
+    rung's rate is fixed at 1/2 minus the tail, so it is read back from the block
+    geometry rather than from the nominal ``rate`` label.
+    """
+    m = mcs(mcs_idx, phy)
+    per_symbol = (
+        int(m.tone_bits) if m.kind == "mfsk" else phy.n_data * m.bps
+    )
+    if m.codec.startswith("conv"):
+        n, k = block_sizes(phy, mcs_idx)
+        return k * per_symbol / (n * phy.sym_time)
+    return per_symbol * m.rate / (phy.sym_time * max(1, m.rep))
+
+
+def in_band_snr(snr_db: float, phy) -> float:
+    """Channel S/N in the 2.75 kHz reference band -> this geometry's own band."""
+    bw = float(getattr(phy, "bandwidth_hz", 0.0) or 0.0)
+    if bw <= 0.0:
+        return float(snr_db)
+    return float(snr_db) + 10.0 * float(np.log10(REFERENCE_BW_HZ / bw))
+
+
+def _highest_rate(candidates, phy) -> int | None:
+    """Pick the candidate rung that carries the most bits per second.
+
+    Table position is *not* rate order: the compact ladder's ``16FSK 1/2 V9``
+    rung sits at the end because MCS indices travel in the frame header, and it
+    is slower than the BPSK rung before it.  Selecting by index picked the 41 bps
+    rung over the 78 bps one whenever both qualified.
+    """
+    best = None
+    best_rate = -1.0
+    for i in candidates:
+        rate = info_rate_bps(phy, i)
+        if rate > best_rate:
+            best, best_rate = i, rate
+    return best
+
+
+def best_mcs(snr_db: float, margin_db: float = 1.0, phy=None) -> int:
+    """Highest-rate MCS whose measured threshold sits below the reported SNR.
+
+    ``snr_db`` is what the receiver's pilot estimator reports, which is the axis
+    of ``MCS.snr_min``.
+
+    Repetition rungs are skipped: their thresholds are measured as *reported*
+    S/N, the estimator reads high at low S/N, so targeting one from an estimate
+    would buy a slower mode for no reason.  They are a floor the link steps onto
+    after failures, so the fallback here is the slowest ordinary mode.
+
+    Long-codeword rungs (``block_mult``) are *not* skipped.  They are ordinary
+    estimator targets, and every rung of the narrow ladders is one -- skipping
+    them left the fallback list empty and rate control collapsed to rung 0 on
+    every narrow profile, including at S/N far above every threshold.
     """
     table = table_for(phy)
-    best = None
-    for i, m in enumerate(table):
-        if m.rep > 1 or m.block_mult > 1:
-            continue
-        if snr_db >= m.snr_min + margin_db:
-            best = i
-    if best is None:
-        # Fall back to the slowest ordinary mode.  A profile may have none (the
-        # narrow ladder is built entirely from long codewords and repetition), in
-        # which case its slowest rung is the answer.
-        plain = [i for i, m in enumerate(table) if m.rep == 1 and m.block_mult == 1]
-        return plain[0] if plain else 0
-    return best
+    candidates = [i for i, m in enumerate(table) if m.rep == 1 and snr_db >= m.snr_min + margin_db]
+    best = _highest_rate(candidates, phy)
+    if best is not None:
+        return best
+    # Fall back to the slowest ordinary mode, never onto a repetition rung.  A
+    # profile may have none (every rung repeated), in which case its slowest rung
+    # is the answer.  Where the ladder has short-block rungs they stay the floor:
+    # that is the choice the wide ladder's goodput tables were measured with.  The
+    # narrow ladders are built entirely from long codewords, so there the floor is
+    # the slowest non-repetition rung -- their rung 0 is two copies of a
+    # 12x-stretched codeword, twice the airtime of the next rung for the same
+    # bytes, so being handed it by a low estimate cost 334 s of a 378 s transfer.
+    ordinary = [i for i, m in enumerate(table) if m.rep == 1]
+    plain = [i for i in ordinary if table[i].block_mult == 1]
+    if plain:
+        return plain[0]
+    if ordinary:
+        return min(ordinary, key=lambda i: info_rate_bps(phy, i))
+    return 0
+
+
+def best_mcs_channel(snr_db: float, margin_db: float = 3.0, phy=None) -> int:
+    """Highest-rate MCS whose measured *channel* threshold this S/N clears.
+
+    The same selection rule as :func:`best_mcs`, on the other measured axis: this
+    one takes a channel S/N in the 2.75 kHz reference band and compares it with
+    each rung's in-band threshold, which is the axis the narrow ladders were
+    measured on.  The host uses this axis because it knows the simulated channel
+    S/N before a frame has been sent.
+    """
+    table = table_for(phy)
+    in_band = in_band_snr(snr_db, phy)
+    candidates = [
+        i for i, m in enumerate(table) if in_band - float(margin_db) >= m.snr_channel
+    ]
+    best = _highest_rate(candidates, phy)
+    return 0 if best is None else best
 
 
 def pack_header(**fields) -> np.ndarray:

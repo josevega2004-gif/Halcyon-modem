@@ -4,8 +4,9 @@
     python -m halcyon.bench --mode goodput --channel moderate
 
 Thresholds are recorded on two axes: the true channel S/N (the honest
-comparison axis, used in the README) and the S/N the receiver's pilot
-estimator reports (the axis rate control uses).  Results go to ``results/``.
+comparison axis, used in the README) and the S/N the receiver reports (the axis
+rate control uses) -- the pilot estimate for the QAM rungs, the payload
+tone-energy estimate for the non-coherent ones.  Results go to ``results/``.
 """
 
 from __future__ import annotations
@@ -19,7 +20,7 @@ import numpy as np
 from scipy.signal import welch
 
 from .channel import make_channel
-from .frame import MCS_TABLE, chunk_bits, mcs, table_for
+from .frame import MCS_TABLE, chunk_bits, info_rate_bps, mcs, table_for
 from .link import Link, LinkConfig
 from .modem import Modem
 from .ofdm import COMPACT, DEEP, MICRO, MINI, NANO, NARROW, ROBUST, Phy
@@ -56,26 +57,8 @@ def shannon_bps(snr_db: float, bw: float = BANDWIDTH_HZ) -> float:
     return bw * np.log2(1.0 + 10.0 ** (snr_db / 10.0))
 
 
-def info_rate_bps(phy: Phy, idx: int) -> float:
-    m = mcs(idx, phy)
-    # 16-FSK carries 4 bits per symbol; a QAM payload carries one point per data
-    # carrier.  Both are then scaled by the code rate and the repetition.
-    # 4 bits for a 16-tone alphabet, 3 for the 8-tone one: reading a fixed 4
-    # here over-reported the 8-FSK rung's rate by a third (10 bps against the
-    # 7.8 bps the geometry actually carried).
-    per_symbol = (
-        int(getattr(m, "tone_bits", 4))
-        if getattr(m, "kind", "qam") == "mfsk"
-        else phy.n_data * m.bps
-    )
-    if getattr(m, "codec", "ldpc").startswith("conv"):
-        # A convolutional rung's rate is fixed at 1/2 minus the tail, not the
-        # nominal ``rate`` field, so read it back from the block geometry.
-        from .frame import block_sizes
-
-        n, k = block_sizes(phy, idx)
-        return k * per_symbol / (n * phy.sym_time)
-    return per_symbol * m.rate / (phy.sym_time * max(1, m.rep))
+# ``info_rate_bps`` is imported from ``frame`` rather than defined here: rate
+# control selects rungs by it, so the ladder and the bench must agree on it.
 
 
 def burst_channel(kind: str, snr_db: float, seed: int, bandwidth_hz: float | None = None):
@@ -179,8 +162,11 @@ def measure_goodput(
     snrs: np.ndarray,
     message_bytes: int,
     messages: int,
+    phy: Phy | None = None,
 ) -> list[dict]:
-    phy = Phy()
+    # The geometry decides both the ladder and the bandwidth the S/N axis is
+    # referred to, so a narrow profile has to be measured on its own band.
+    phy = phy or Phy()
     modem = Modem(phy)
     rows = []
     for snr in snrs:
@@ -207,7 +193,7 @@ def measure_goodput(
             {
                 "snr_db": float(snr),
                 "goodput_bps": gp,
-                "shannon_bps": shannon_bps(float(snr)),
+                "shannon_bps": shannon_bps(float(snr), phy.bandwidth_hz),
                 "mean_mcs": float(np.mean(mcses)),
                 "retx": float(np.mean(retx)),
                 "complete": float(np.mean(complete)),
@@ -215,8 +201,8 @@ def measure_goodput(
             }
         )
         print(
-            f"  S/N {snr:5.1f} dB  goodput {gp:7.0f} bps  "
-            f"({100 * gp / shannon_bps(float(snr)):4.1f}% of Shannon)  "
+            f"  S/N {snr:5.1f} dB  goodput {gp:7.1f} bps  "
+            f"({100 * gp / shannon_bps(float(snr), phy.bandwidth_hz):4.1f}% of Shannon)  "
             f"mcs {np.mean(mcses):4.1f}  retx {np.mean(retx):3.1f}  "
             f"ok {100 * np.mean(complete):3.0f}%  (rx sees {np.mean(reps):4.1f} dB)"
         )
@@ -401,9 +387,10 @@ def thresholds_table(rows: list[dict], kind: str, phy: Phy | None = None) -> str
     return "\n".join(out)
 
 
-def goodput_table(rows: list[dict]) -> str:
+def goodput_table(rows: list[dict], phy: Phy | None = None) -> str:
+    bw = BANDWIDTH_HZ if phy is None else float(phy.bandwidth_hz)
     out = [
-        f"| S/N ({BANDWIDTH_HZ:.0f} Hz) | goodput | % of Shannon | mean MCS | retx | complete |",
+        f"| S/N ({bw:.0f} Hz) | goodput | % of Shannon | mean MCS | retx | complete |",
         "|--------------:|--------:|-------------:|---------:|-----:|---------:|",
     ]
     for r in rows:
@@ -429,6 +416,12 @@ def main() -> None:
         default="wide",
     )
     ap.add_argument("--half", type=float, default=3.5, help="threshold search half-width, dB")
+    ap.add_argument(
+        "--step",
+        type=float,
+        default=1.0,
+        help="threshold sweep step, dB (0.5 resolves half-decibel crossings)",
+    )
     ap.add_argument("--frames", type=int, default=4, help="frames per threshold point")
     ap.add_argument("--messages", type=int, default=4, help="messages per goodput point")
     ap.add_argument("--message-bytes", type=int, default=600)
@@ -444,7 +437,9 @@ def main() -> None:
             f"Measuring thresholds on '{args.channel}' channel, {args.profile} profile "
             f"({phy.active.size} carriers, {phy.bandwidth_hz:.0f} Hz)"
         )
-        rows = measure_thresholds(args.channel, args.frames, half=args.half, phy=phy)
+        rows = measure_thresholds(
+            args.channel, args.frames, step=args.step, half=args.half, phy=phy
+        )
         table = thresholds_table(rows, args.channel, phy)
         # Keep the wide profile's historical filenames; a second profile must not
         # overwrite them.
@@ -496,11 +491,20 @@ def main() -> None:
         print(f"written {path}")
 
     if args.mode in ("goodput", "all"):
-        print(f"\nMeasuring end-to-end goodput on '{args.channel}' channel")
+        phy = PROFILES[args.profile]()
+        print(
+            f"\nMeasuring end-to-end goodput on '{args.channel}' channel, "
+            f"{args.profile} profile ({phy.bandwidth_hz:.0f} Hz)"
+        )
         snrs = np.arange(args.snr_min, args.snr_max + 1e-9, args.snr_step)
-        rows = measure_goodput(args.channel, snrs, args.message_bytes, args.messages)
-        table = goodput_table(rows)
-        path = os.path.join(RESULTS_DIR, f"goodput_{args.channel}.md")
+        rows = measure_goodput(
+            args.channel, snrs, args.message_bytes, args.messages, phy
+        )
+        table = goodput_table(rows, phy)
+        stem = "goodput_" + args.channel + (
+            "" if args.profile == "wide" else f"_{args.profile}"
+        )
+        path = os.path.join(RESULTS_DIR, f"{stem}.md")
         write_markdown(path, f"# Halcyon goodput, `{args.channel}` channel", table)
         print(table)
         print(f"written {path}")

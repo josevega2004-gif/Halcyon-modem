@@ -35,21 +35,34 @@ import time
 from collections import deque
 from dataclasses import dataclass, field
 
-import numpy as np
-
 from .channel import make_channel
-from .frame import MAX_BLOCKS, chunk_bits, table_for
+from .frame import (
+    MAX_BLOCKS,
+    REFERENCE_BW_HZ,
+    best_mcs_channel,
+    chunk_bits,
+    in_band_snr,
+    info_rate_bps,
+    table_for,
+)
 from .modem import Modem
-from .ofdm import COMPACT, DEEP, MICRO, MINI, NANO, ROBUST, Phy
+from .ofdm import COMPACT, DEEP, NANO, ROBUST, Phy
 
 VERSION = "Halcyon 0.1 host mode"
 CMD_PORT = 8300
 DATA_PORT = 8301
 HEARTBEAT_S = 15.0
-# The channel model quotes S/N in this passband, as operators do.  A narrow
-# receiver sees a higher in-band S/N at the same noise density; thresholds in
-# the compact/robust tables are already in-band values.
-REFERENCE_BW_HZ = 2742.1875
+# Rate control keeps this much margin over a rung's measured threshold; below
+# it a rung is only reached when the ladder has no faster option left.
+MCS_MARGIN_DB = 3.0
+# Bytes a client writes while unlinked are held for the next link; a client that
+# never links must not be able to grow this without bound.
+MAX_BUFFERED = 256 * 1024
+
+# The modulation ladder, widest first.  A move to a lower rank is a fallback and
+# a move to a higher rank a recovery; both are written to the host log while a
+# link is up, so an operator can see the link adapt in either direction.
+_PROFILE_RANK = {"wide": 3, "compact": 2, "deep": 1, "nano": 0}
 
 
 def geometry_for(bandwidth: int, snr_db: float | None = None) -> tuple[str, Phy]:
@@ -59,19 +72,16 @@ def geometry_for(bandwidth: int, snr_db: float | None = None) -> tuple[str, Phy]
     default xara uses.  At -4 dB and below, use the 375 Hz deep test geometry:
     it measured 55.2 bps against 36.5 bps at -8 dB and still fits the 500 Hz
     class.  At -12 dB use the 234 Hz nano geometry instead; its 16 bps rung
-    measured 11.4 bps against 6.6 bps for the 21 bps deep rung.  The selected
-    sweep profiles are the deeper fallbacks: 225 Hz mini (16-FSK, 11.7 bps) from
-    -15.5 dB, and 175 Hz micro (8-FSK, 8.8 bps) from -16.5 dB.  Those are the
-    short-frame limits measured in the host, not the six-block bench thresholds;
-    below -16.5 dB neither new profile has a reliable one-block frame yet.  At
+    measured 11.4 bps against 6.6 bps for the 21 bps deep rung.  A 500 Hz start
+    is a ceiling: the host never selects the wide profile, even if a later
+    BW2300 or BW2750 arrives, and may still fall back to deep/nano.  Nano is the
+    floor: the 225 Hz mini and 175 Hz micro test profiles are not host fallbacks,
+    because mini's 600-byte link measured 1.4-1.9 bps and micro is slower still,
+    below the 6 bps worth operating.  At
     ordinary S/N 2300 and 2750 map to the wide profile, whose occupied bandwidth
     is 2.74 kHz -- slightly wider than the 2300 Hz setting the selector asks for,
     which is the one honest mismatch in this mapping.
     """
-    if snr_db is not None and snr_db <= -16.5:
-        return "micro", Phy(**MICRO)
-    if snr_db is not None and snr_db <= -15.5:
-        return "mini", Phy(**MINI)
     if snr_db is not None and snr_db <= -12.0:
         return "nano", Phy(**NANO)
     if snr_db is not None and snr_db <= -4.0:
@@ -84,17 +94,11 @@ def geometry_for(bandwidth: int, snr_db: float | None = None) -> tuple[str, Phy]
 def pick_mcs(phy: Phy, snr: float) -> int:
     """Highest rung with 3 dB of margin at this channel S/N.
 
-    ``snr`` is referred to the 2.7 kHz channel, but each ladder's thresholds are
-    measured in its own band.  Convert first: at a fixed noise density the 492 Hz
-    receiver sees 7.5 dB more S/N than the wide one, which is exactly the margin
-    that lets its 21/42 bps rungs work at -8 dB.
+    ``snr`` is referred to the 2.75 kHz channel, but each ladder's thresholds are
+    measured in its own band; :func:`frame.best_mcs_channel` does the conversion
+    and the selection, so the host and the link cannot drift apart on either.
     """
-    in_band = snr + 10.0 * float(np.log10(REFERENCE_BW_HZ / phy.bandwidth_hz))
-    best = 0
-    for i, m in enumerate(table_for(phy)):
-        if in_band - 3.0 >= m.snr_channel:
-            best = i
-    return best
+    return best_mcs_channel(snr, MCS_MARGIN_DB, phy)
 
 
 @dataclass
@@ -122,30 +126,115 @@ class HostProtocol:
 
     def __init__(self, mycall: str = "N0CALL", bandwidth: int = 2300,
                  sink=None, snr: float = 10.0, channel: str = "awgn"):
-        self.state = HostState(mycall=mycall, bandwidth=bandwidth)
+        bw = int(bandwidth)
+        # A 500 Hz selection is a ceiling, not just a starting point: the host
+        # may fall back to 375/234 Hz at low S/N, but a later BW2300/BW2750
+        # from the client must not widen it.
+        self.max_bandwidth = 500 if bw <= 500 else None
+        self.state = HostState(mycall=mycall, bandwidth=self._capped(bw))
         self.snr = float(snr)
         self.channel = channel
         self.log: deque[tuple[str, str]] = deque(maxlen=400)
         self._sink = sink
         self._modem: Modem | None = None
+        # One warning per low-margin episode: a weak path should not fill the
+        # log with a line per burst, and recovery closes the episode.
+        self._low_margin_warned = False
+        self._low_margin_since: float | None = None
+        # PAT dials two command connections and two data connections and we serve
+        # every one of them on its own thread, so the state machine is shared.
+        # ``_lock`` guards the state; ``_air`` serialises the modem, which is the
+        # only work here worth several seconds of CPU.  RLock because the command
+        # handlers call helpers that take the same lock.
+        self._lock = threading.RLock()
+        self._air = threading.Lock()
 
     # -- plumbing ----------------------------------------------------------
     def emit(self, line: str) -> None:
-        self.log.append((time.strftime("%H:%M:%S"), line))
+        with self._lock:
+            self.log.append((time.strftime("%H:%M:%S"), line))
         if self._sink is not None:
             try:
                 self._sink(line)
             except Exception:  # a dead client must not kill the state machine
                 pass
 
+    def _capped(self, bandwidth: int) -> int:
+        value = int(bandwidth)
+        if self.max_bandwidth is not None and value > self.max_bandwidth:
+            return self.max_bandwidth
+        return value
+
+    def _set_bandwidth(self, bandwidth: int) -> None:
+        """Record a client bandwidth request without ever widening a 500 cap."""
+        value = int(bandwidth)
+        if value <= 0:
+            return
+        if value <= 500:
+            self.max_bandwidth = 500
+            value = 500
+        self.state.bandwidth = self._capped(value)
+
     def modem(self) -> Modem:
-        _, phy = geometry_for(self.state.bandwidth, self.snr)
-        if self._modem is None or self._modem.phy.profile != phy.profile:
-            self._modem = Modem(phy)
-        return self._modem
+        with self._lock:
+            _, phy = geometry_for(self.state.bandwidth, self.snr)
+            previous = self._modem.phy.profile if self._modem is not None else None
+            if self._modem is None or previous != phy.profile:
+                self._modem = Modem(phy)
+                if (previous in _PROFILE_RANK and phy.profile in _PROFILE_RANK
+                        and _PROFILE_RANK[phy.profile] != _PROFILE_RANK[previous]
+                        and self.state.linked):
+                    self._note_transition(previous, phy)
+            return self._modem
+
+    def _note_transition(self, previous: str, phy: Phy) -> None:
+        """Record a profile change in the host log, once per change."""
+        wider = _PROFILE_RANK[phy.profile] > _PROFILE_RANK[previous]
+        self.log.append((
+            time.strftime("%H:%M:%S"),
+            f"({'recovery' if wider else 'fallback'} {previous} -> {phy.profile} "
+            f"{phy.bandwidth_hz:.0f} Hz at S/N {self.snr:+.1f} dB)",
+        ))
+
+    def _check_margin(self, phy: Phy, idx: int) -> None:
+        """Log the start and the end of a below-target margin episode."""
+        with self._lock:
+            if not self.state.linked:
+                return
+            mode = table_for(phy)[idx]
+            margin = in_band_snr(self.snr, phy) - mode.snr_channel
+            low = margin < MCS_MARGIN_DB
+            detail = ""
+            if low and not self._low_margin_warned:
+                self._low_margin_warned = True
+                self._low_margin_since = time.monotonic()
+                kind = "low margin"
+            elif not low and self._low_margin_warned:
+                self._low_margin_warned = False
+                since = self._low_margin_since
+                self._low_margin_since = None
+                kind = "margin recovered"
+                if since is not None:
+                    detail = f", after {time.monotonic() - since:.1f} s"
+            else:
+                return
+            self.log.append((
+                time.strftime("%H:%M:%S"),
+                f"({kind}: L{idx} {mode.label} at S/N {self.snr:+.1f} dB, "
+                f"{margin:+.1f} dB vs {MCS_MARGIN_DB:g} dB target{detail})",
+            ))
+
+    def linked(self) -> bool:
+        with self._lock:
+            return bool(self.state.linked)
 
     # -- command handling --------------------------------------------------
     def handle(self, line: str) -> None:
+        """Feed one CR-terminated command line, from any client thread."""
+        with self._lock:
+            self._handle(line)
+
+    def _handle(self, line: str) -> None:
         text = line.strip()
         if not text:
             return
@@ -160,10 +249,10 @@ class HostProtocol:
                 self.state.aliases = [c.upper() for c in calls[1:]]
             return
         if head in ("BW500", "BW2300", "BW2750"):
-            self.state.bandwidth = int(head[2:])
+            self._set_bandwidth(int(head[2:]))
             return
         if head == "BW" and arg.isdigit():
-            self.state.bandwidth = int(arg)
+            self._set_bandwidth(int(arg))
             return
         if head == "LISTEN":
             on = arg.upper().startswith("ON") or arg.upper() == "CQ"
@@ -212,7 +301,7 @@ class HostProtocol:
             # CONNECT <bandwidth> <target>: other hosts also accept the
             # selector first, so treat a leading number as bandwidth rather than
             # as our own callsign.
-            self.state.bandwidth = int(fields[0])
+            self._set_bandwidth(int(fields[0]))
             src, dst = self.state.mycall, fields[1].upper()
         elif len(fields) >= 2:
             src, dst = fields[0].upper(), fields[1].upper()
@@ -226,7 +315,6 @@ class HostProtocol:
         self.emit("PTT ON")
         self.emit(f"CONNECTED {src} {dst}")
         self.emit("PTT OFF")
-        with_lock = getattr(self, "_lock", None)  # noqa: F841 - documented below
         self.state.linked = True
         self.state.peer = dst
         self.state.connected_at = time.time()
@@ -235,6 +323,8 @@ class HostProtocol:
         was = self.state.linked
         self.state.linked = False
         self.state.peer = ""
+        self._low_margin_warned = False
+        self._low_margin_since = None
         self.emit("DISCONNECTED")
         if not was:
             self.log.append((time.strftime("%H:%M:%S"), "(disconnect with no link)"))
@@ -242,40 +332,103 @@ class HostProtocol:
     # -- data plane --------------------------------------------------------
     def carry(self, data: bytes) -> bytes:
         """Push bytes through the modem over the simulated channel, return what
-        the far end decoded.  This is the link the host-mode ports ride on."""
-        if not self.state.linked or not data:
-            return b""
-        modem = self.modem()
-        phy = modem.phy
-        idx = pick_mcs(phy, self.snr)
-        cap = chunk_bits(phy, idx) * MAX_BLOCKS // 8
-        out = bytearray()
-        for start in range(0, len(data), max(1, cap)):
-            chunk = data[start : start + cap]
-            tx, _ = modem.build(chunk, idx, seq=0)
-            ch = make_channel(
-                self.channel, self.snr, seed=(len(chunk) * 31 + start) & 0x7FFFFFFF,
-                bandwidth_hz=REFERENCE_BW_HZ,
-            )
-            res = modem.receive(ch(tx))
-            self.state.last_sn = round(float(res.snr_db), 1) if res.header_ok else None
-            if res.header_ok:
-                self.emit(f"SN {int(round(res.snr_db))}")
-            self.emit("PTT ON")
-            self.state.bytes_tx += len(chunk)
-            if res.ok:
-                payload = bytes(res.payload or b"")
-                out.extend(payload)
-                self.state.bytes_rx += len(payload)
-            self.emit("PTT OFF")
-            self.emit("BUFFER 0")
-        return bytes(out)
+        the far end decoded.  This is the link the host-mode ports ride on.
+
+        ``_air`` is held for the whole transfer so two data connections cannot
+        drive the same modem at once; the state lock is taken only around the
+        reads and writes of it, so commands (ABORT, VERSION) still get served
+        while a burst is on the air.
+        """
+        with self._air:
+            with self._lock:
+                if not self.state.linked or not data:
+                    return b""
+                modem = self.modem()
+            phy = modem.phy
+            idx = pick_mcs(phy, self.snr)
+            self._check_margin(phy, idx)
+            cap = chunk_bits(phy, idx) * MAX_BLOCKS // 8
+            out = bytearray()
+            for start in range(0, len(data), max(1, cap)):
+                chunk = data[start : start + cap]
+                tx, _ = modem.build(chunk, idx, seq=0)
+                ch = make_channel(
+                    self.channel, self.snr, seed=(len(chunk) * 31 + start) & 0x7FFFFFFF,
+                    bandwidth_hz=REFERENCE_BW_HZ,
+                )
+                res = modem.receive(ch(tx))
+                with self._lock:
+                    self.state.last_sn = round(float(res.snr_db), 1) if res.header_ok else None
+                    self.state.bytes_tx += len(chunk)
+                    if res.ok:
+                        payload = bytes(res.payload or b"")
+                        out.extend(payload)
+                        self.state.bytes_rx += len(payload)
+                if res.header_ok:
+                    self.emit(f"SN {int(round(res.snr_db))}")
+                self.emit("PTT ON")
+                self.emit("PTT OFF")
+                self.emit("BUFFER 0")
+            return bytes(out)
 
     def status(self) -> dict:
+        with self._lock:
+            return self._status()
+
+    def _next_rung(self, phy: Phy, idx: int) -> tuple[int | None, float | None]:
+        """The rung rate control moves to next, and the channel S/N that does it.
+
+        Rate order, not table order: the compact ladder's 41 bps rung sits last.
+        The first higher rate to become eligible is the switch point; sampling
+        just above it reports whichever rung the selector actually lands on,
+        because a faster rung with the same threshold can be chosen instead.
+        """
+        table = table_for(phy)
+        rate = info_rate_bps(phy, idx)
+        offset = in_band_snr(0.0, phy)
+        needs = [
+            m.snr_channel + MCS_MARGIN_DB - offset
+            for i, m in enumerate(table)
+            if info_rate_bps(phy, i) > rate
+        ]
+        if not needs:
+            return None, None
+        need = float(min(needs))
+        nxt = pick_mcs(phy, need + 0.01)
+        return nxt, need
+
+    def _status(self) -> dict:
+        # The selector (``bandwidth``) is what the client asked for; the profile
+        # and its occupied width are what the modem will actually put on the air
+        # at the current S/N.  Computing the geometry here is pure, so status
+        # never builds a modem or writes a transition line as a side effect.
+        profile, phy = geometry_for(self.state.bandwidth, self.snr)
+        idx = pick_mcs(phy, self.snr)
+        table = table_for(phy)
+        mode = table[idx]
+        # Margin over the rung's measured in-band threshold.  Rate control asks
+        # for 3 dB, so this is normally >= 3 and falls only at a ladder's floor.
+        margin = in_band_snr(self.snr, phy) - mode.snr_channel
+        nxt, nxt_snr = self._next_rung(phy, idx)
         return {
             "mycall": self.state.mycall,
             "aliases": list(self.state.aliases),
             "bandwidth": self.state.bandwidth,
+            "profile": profile,
+            "occupied_hz": round(float(phy.bandwidth_hz), 1),
+            "mcs": idx,
+            "mcs_label": mode.label,
+            "mcs_margin_db": round(float(margin), 1),
+            "mcs_margin_low": margin < MCS_MARGIN_DB,
+            "mcs_margin_low_s": (
+                round(time.monotonic() - self._low_margin_since, 1)
+                if self._low_margin_warned and self._low_margin_since is not None
+                else None
+            ),
+            "next_mcs": nxt,
+            "next_mcs_label": table[nxt].label if nxt is not None else None,
+            "next_mcs_snr_db": round(nxt_snr, 1) if nxt_snr is not None else None,
+            "max_bandwidth": self.max_bandwidth,
             "listening": self.state.listening,
             "linked": self.state.linked,
             "peer": self.state.peer,
@@ -326,7 +479,10 @@ class HostServer:
         try:
             self._data_sock = self._listen(self.data_port)
         except OSError:
+            # Leave no closed socket behind: ``running`` keys off this attribute,
+            # and a server that failed to start must not claim to be up.
             self._cmd_sock.close()
+            self._cmd_sock = None
             raise
         self.cmd_port = self._cmd_sock.getsockname()[1]
         self.data_port = self._data_sock.getsockname()[1]
@@ -435,20 +591,34 @@ class HostServer:
 
     def _serve_data(self, conn: socket.socket) -> None:
         conn.settimeout(0.5)
+        # Bytes written while unlinked are buffered and sent on the next link, as
+        # the protocol says.  Buffering them here rather than spinning on the link
+        # flag means the thread keeps reading: a client that disconnects while it
+        # waits is noticed, instead of holding a thread and a socket forever.
+        buffered = bytearray()
         while not self._stop.is_set():
+            pending = b""
             try:
                 data = conn.recv(1024)
             except socket.timeout:
-                continue
+                data = None
             except OSError:
                 break
-            if not data:
+            if data == b"":
                 break
-            # Bytes written while unlinked are buffered and sent on the
-            # next link; so do we, which is why nothing is dropped here.
-            while not self.protocol.state.linked and not self._stop.is_set():
-                time.sleep(0.02)
-            back = self.protocol.carry(data)
+            if data:
+                if self.protocol.linked():
+                    pending = bytes(buffered) + data
+                    buffered.clear()
+                elif len(buffered) < MAX_BUFFERED:
+                    buffered.extend(data)
+            elif self.protocol.linked() and buffered:
+                # The link came up between reads: flush what was queued for it.
+                pending = bytes(buffered)
+                buffered.clear()
+            if not pending:
+                continue
+            back = self.protocol.carry(pending)
             if self.echo and back:
                 try:
                     conn.sendall(back)
@@ -463,10 +633,9 @@ class HostServer:
                 self._data_conns.remove(conn)
 
     def _heartbeat(self) -> None:
-        while not self._stop.is_set():
-            time.sleep(HEARTBEAT_S)
-            if self._stop.is_set():
-                break
+        # Waiting on the stop event rather than sleeping lets ``stop`` join this
+        # thread instead of timing out on it.
+        while not self._stop.wait(HEARTBEAT_S):
             if self._clients:
                 self._send_line("IAMALIVE")
 
@@ -499,7 +668,7 @@ def main(argv: list[str] | None = None) -> int:
     ap.add_argument("--mycall", default="N0CALL", help="callsign before the client sends MYCALL")
     ap.add_argument(
         "--bandwidth", type=int, default=2300, choices=(500, 2300, 2750),
-        help="default bandwidth selector",
+        help="default bandwidth selector; 500 is a hard ceiling",
     )
     ap.add_argument("--snr", type=float, default=10.0, help="simulated link S/N, dB")
     ap.add_argument(

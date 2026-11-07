@@ -8,6 +8,16 @@ from halcyon.ofdm import Phy
 from halcyon.ui import _audio, _decode, _waterfall, modes_payload
 
 
+def test_cross_origin_posts_are_refused():
+    from halcyon.ui import _origin_allowed
+
+    assert _origin_allowed(None, "127.0.0.1:8730")
+    assert _origin_allowed("http://localhost:8730", "localhost:8730")
+    # a page served from elsewhere, and the DNS-rebinding variant of it
+    assert not _origin_allowed("https://evil.example", "127.0.0.1:8730")
+    assert not _origin_allowed(None, "evil.example:8730")
+
+
 def test_modes_payload_covers_every_profile_and_rung():
     d = modes_payload()
     assert [p["id"] for p in d["profiles"]] == [

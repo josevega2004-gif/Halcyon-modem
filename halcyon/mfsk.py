@@ -74,6 +74,43 @@ class MFSK:
         return out
 
 
+def snr_from_tones(energy: np.ndarray, m: int) -> float:
+    """In-band S/N (dB) from non-coherent tone energies.
+
+    One of the ``m`` tones carries signal plus noise and the other ``m - 1``
+    carry noise only, so a symbol's **median** is a noise order statistic.  For
+    exponential (complex-Gaussian power) noise its expectation is ``ln 2`` times
+    the mean, and that constant is the order-statistic bias: dividing a symbol's
+    energies by its own median pins the noise mean at ``1 / ln 2`` whatever the
+    gain, leaving the signal in the total alone.
+
+        total / m = 1 / ln 2 + per-tone signal / ln 2
+
+    Using the median rather than the maximum matters: a peak-based estimate needs
+    the expected maximum of ``m - 1`` exponentials, which is only valid while the
+    signal tone really is the largest one, and measures low once it is not.  The
+    median is a noise tone either way, so the estimate stays linear down to the
+    point where the tones are indistinguishable -- and there it floors instead
+    of inventing a level.  The bias it leaves is a fixed fraction of a dB from
+    the one signal tone nudging the median, and being constant it is already in
+    any threshold measured with this estimator.
+
+    Dividing by ``m`` refers the result to the whole occupied band, the same
+    axis the QAM rungs report on, so one threshold table serves both.
+    """
+    E = np.asarray(energy, dtype=np.float64)
+    m = int(m)
+    if E.ndim != 2 or E.shape[1] != m:
+        raise ValueError("expected (symbols, m) tone energies")
+    med = np.median(E, axis=1)
+    total = float(np.mean(E.sum(axis=1) / np.maximum(med, 1e-12)))
+    noise_total = m / np.log(2.0)   # m noise tones, each with mean 1/ln2
+    signal = total - noise_total
+    if not np.isfinite(signal) or signal <= 0.0:
+        return -99.0
+    return float(10.0 * np.log10(signal / noise_total))
+
+
 def mfsk(m: int = 16) -> MFSK:
     inst = _CACHE.get(int(m))
     if inst is None:

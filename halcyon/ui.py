@@ -41,6 +41,37 @@ INDEX = ROOT / "ui" / "index.html"  # the bench console: frame anatomy, ladder c
 MAX_BODY = 256 * 1024
 CHANNELS = ("awgn", "good", "moderate", "poor")
 
+_LOOPBACK_HOSTS = frozenset({"127.0.0.1", "localhost", "::1"})
+
+
+def _hostname(value: str | None) -> str:
+    """Host part of an Origin or Host header, without the port."""
+    if not value:
+        return ""
+    text = value if "//" in value else "//" + value
+    return (urlparse(text).hostname or "").lower()
+
+
+def _origin_allowed(origin: str | None, host_header: str | None, bound: str = "127.0.0.1") -> bool:
+    """True when a POST may act on this console.
+
+    This API can key a transmitter, so a page the operator happens to have open
+    must not reach it.  Two headers are checked, because neither can be forged by
+    a browser: ``Origin`` refuses a page served from anywhere but this machine,
+    and ``Host`` refuses the DNS-rebinding form of the same trick.  The caller
+    also requires ``Content-Type: application/json``, which makes a cross-origin
+    request need a preflight that this server never answers.
+    """
+    allowed = _LOOPBACK_HOSTS | {str(bound).lower()}
+    if origin not in (None, "", "null"):
+        host = _hostname(origin)
+        if host and host not in allowed:
+            return False
+    host = _hostname(host_header)
+    if host and host not in allowed:
+        return False
+    return True
+
 # (label, band caption, geometry factory)
 PROFILES: dict[str, tuple[str, str, object]] = {
     "wide": ("Wide", "2.75 kHz", Phy),
@@ -787,11 +818,25 @@ class Api(BaseHTTPRequestHandler):
 
     def do_POST(self) -> None:  # noqa: N802
         u = urlparse(self.path)
+        ctype = (self.headers.get("Content-Type") or "").split(";")[0].strip().lower()
+        if ctype != "application/json":
+            # A simple cross-origin request cannot set this header, so refusing
+            # anything else is what stops a visited page from driving the API.
+            self.close_connection = True
+            return self._fail("Content-Type must be application/json", 415)
+        if not _origin_allowed(
+            self.headers.get("Origin"),
+            self.headers.get("Host"),
+            str(self.server.server_address[0]),
+        ):
+            self.close_connection = True
+            return self._fail("cross-origin requests are refused", 403)
         try:
             length = int(self.headers.get("Content-Length") or 0)
         except ValueError:
             return self._fail("bad Content-Length")
         if length > MAX_BODY:
+            self.close_connection = True
             return self._fail("request too large", 413)
         raw = self.rfile.read(length) if length else b"{}"
         try:

@@ -34,7 +34,7 @@ control floor. After the fix, the wide profile completes 600 bytes at 168 bps
 at -2.1 dB and 47 bps at -3 dB, instead of the previous 0 %.
 
 The remaining -4.4 dB zero is not the same bug. The wide profile's bottom rung
-is 227 bps at a measured -2.5 dB threshold. Starting the link directly at MCS 0
+is 227 bps at a measured -3.0 dB threshold. Starting the link directly at MCS 0
 and allowing 16 attempts delivered 120 bytes at -4 dB, but only at 18 bps --
 too slow and still short of xara's 121 bps. Retrying the existing bottom rung is
 not enough.
@@ -63,9 +63,9 @@ was not used. The 375 Hz deep test is 1.2 dB narrower than compact and wins
 clearly at -8 and -10 dB; the 234 Hz nano test is narrower still and wins at
 -12 dB because its 16 bps 8-FSK rung needs less signal than the 21 bps 16-FSK
 rung. Narrower is not automatically faster: at -8 dB nano carries half of
-deep's goodput. The host uses compact normally, deep from -4 dB, nano at
--12 dB, 225 Hz mini at -16 dB and 175 Hz micro at -18 dB; the narrow
-geometries remain test profiles in the bench and console.
+deep's goodput. The host uses compact normally, deep from -4 dB and nano at
+-12 dB, with no slower fallback: mini and micro remain test profiles in the
+bench and console.
 
 ## Closing -4 to -6 dB without a 10 bps mode
 

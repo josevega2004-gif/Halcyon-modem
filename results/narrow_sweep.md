@@ -79,9 +79,11 @@ it looks better than 8-FSK, but only by 0.5 dB and at two-thirds the speed.
   the same sensitivity as 350 Hz with less bandwidth.
 - **Do not pick 4-FSK** at these widths: it is either below the 10 bps floor or
   less sensitive than 8/16-FSK at the same rate.
-- **Defaults:** 175 Hz `micro` and 225 Hz `mini` are now host fallbacks in the
-  bench, console and host ladder.  The host thresholds use the measured
-  short-frame limits: `mini` from −15.5 dB and `micro` from −16.5 dB.  Those are
+- **Defaults:** 175 Hz `micro` and 225 Hz `mini` remain selectable bench and
+  console profiles, but the host no longer falls back to them.  Mini's 600-byte
+  link measured 1.4–1.9 bps and micro is slower still, below the 6 bps floor
+  worth operating; the host ladder ends at 234 Hz nano.  The old host thresholds
+  used the measured short-frame limits (`mini` −15.5 dB, `micro` −16.5 dB),
   stricter than the six-block bench thresholds because one-block short frames
   are marginal at the bench crossing.
 - No 600-byte ARQ link was run at these points; the numbers are block-FER

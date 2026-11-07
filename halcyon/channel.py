@@ -20,12 +20,24 @@ def awgn(x: np.ndarray, snr_db: float, fs: float, bandwidth_hz: float, rng) -> n
 
 
 def fractional_delay(x: np.ndarray, delay: float) -> np.ndarray:
-    """Delay by a (possibly fractional) number of samples using a phase ramp."""
+    """Delay by a (possibly fractional) number of samples using a phase ramp.
+
+    The ramps are applied to a zero-padded copy of ``x`` so the shift is *linear*.
+    A circular shift -- transforming the burst at its own length -- wraps the last
+    samples of the frame onto its start: that hands the receiver a free cyclic
+    prefix and destroys the tail of every fading capture, which is exactly the
+    effect a fading measurement is supposed to isolate.  Samples shifted in at
+    the front (a negative delay) or past the end come from and go to the zero
+    padding, as a real delay line would.
+    """
     if abs(delay) < 1e-9:
         return x
+    x = np.asarray(x)
     n = x.size
-    f = np.fft.fftfreq(n)
-    return np.fft.ifft(np.fft.fft(x) * np.exp(-2j * np.pi * f * delay))
+    total = n + int(np.ceil(abs(delay))) + 2
+    f = np.fft.fftfreq(total)
+    shifted = np.fft.ifft(np.fft.fft(x, total) * np.exp(-2j * np.pi * f * delay))
+    return shifted[:n]
 
 
 def doppler_process(n: int, fs: float, doppler_hz: float, rng) -> np.ndarray:

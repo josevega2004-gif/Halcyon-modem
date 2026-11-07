@@ -675,8 +675,19 @@ function renderServices() {
   const p = v.protocol || {};
   $('#svcStart').textContent = v.running ? 'Stop modem host' : 'Start modem host';
   $('#svcNote').textContent = v.running ? (p.linked ? 'linked' : 'idle') : 'off';
+  const low = p.mcs_margin_low
+    ? (p.mcs_margin_low_s != null
+        ? ` (below target, ${p.mcs_margin_low_s} s)` : ' (below target)')
+    : '';
+  const active = p.profile
+    ? ` · ${p.profile} ${Math.round(p.occupied_hz || 0)} Hz` +
+      (p.mcs !== undefined
+        ? ` · L${p.mcs} +${p.mcs_margin_db} dB${low}` : '') +
+      (p.next_mcs !== undefined && p.next_mcs !== null
+        ? ` · next L${p.next_mcs} @ ${p.next_mcs_snr_db} dB` : '')
+    : '';
   $('#svcState').textContent = v.running
-    ? `${p.mycall || 'N0CALL'} · BW${p.bandwidth || 2300} · ` +
+    ? `${p.mycall || 'N0CALL'} · BW${p.bandwidth || 2300}${active} · ` +
       `${p.linked ? 'linked to ' + (p.peer || '?') : 'listening on 8300'}` +
       (p.bytes_rx ? `\n${p.bytes_tx} B out · ${p.bytes_rx} B in` : '')
     : 'modem host off — PAT and VarAC have nothing to attach to';

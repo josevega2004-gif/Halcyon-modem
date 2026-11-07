@@ -340,14 +340,21 @@ class Modem:
             rx = np.pad(rx, (0, need - rx.size))
         _mode = mcs(res.mcs, self.phy)
         if _mode.kind == "mfsk":
-            from .mfsk import mfsk as _mfsk
+            from .frame import header_power_db
+            from .mfsk import mfsk as _mfsk, snr_from_tones
 
             tones_n = 1 << int(_mode.tone_bits)
             E = self.phy.demodulate_mfsk(
                 rx[p_off : p_off + n_syms * sym_len], n_syms, tones_n
             )
             llr = _mfsk(tones_n).demap(E, self.mfsk_scale).ravel()
-            res.snr_db = snr_h
+            # The header estimate is the *header's* S/N, and the QPSK header puts
+            # power on every data carrier where a tone puts it on one: measured
+            # 10-14 dB high on these profiles.  The payload's own tone energies
+            # give the S/N the data actually saw.
+            res.snr_db = snr_from_tones(E, tones_n) + header_power_db(
+                self.phy, _mode, blocks
+            )
         else:
             X, var, snr = self.phy.demodulate(rx[p_off : p_off + n_syms * sym_len], n_syms)
             res.snr_db = snr if np.isfinite(snr) else snr_h

@@ -55,7 +55,7 @@ Useful options:
 | Option | Meaning |
 | --- | --- |
 | `--mycall CALL` | Callsign used until the client sends `MYCALL`. PAT sends it on every dial, so this is only a default. |
-| `--bandwidth 500\|2300\|2750` | Default geometry selector. `500` uses the robust profile; `2300` and `2750` use the wide profile (2.74 kHz occupied). |
+| `--bandwidth 500\|2300\|2750` | Default geometry selector. `500` is a hard ceiling: the host starts on the compact profile (492 Hz low-speed ladder), may narrow to 375 Hz below −4 dB and 234 Hz below −12 dB, and clamps a later `BW2300`/`BW2750` to 500. `2300` and `2750` use the wide profile (2.74 kHz occupied). |
 | `--host ADDRESS` | Bind address, default `127.0.0.1`. Leave it on loopback. |
 | `--cmd-port`, `--data-port` | Port numbers, default 8300 and 8301. Change these only if you also change PAT. |
 | `--snr DB`, `--channel NAME` | Simulated link conditions (`awgn`, `good`, `moderate`, `poor`). |
@@ -98,7 +98,8 @@ Keep every other key in the file as it is. PAT rewrites this file when you use
 The configuration is private to your user; `halcyon-switch` writes it mode 0600.
 
 The bandwidth value is what PAT announces with `BW2300`. It also sends its own
-`BW...` command on the air, and the host takes the value PAT sends.
+`BW...` command on the air, and the host takes the value PAT sends, except that a
+host started at 500 keeps it as a ceiling and clamps a wider announcement.
 
 ### 3. Dial
 
@@ -174,9 +175,20 @@ mail needs a peer.
 terminal that is running `halcyon-host`). Unknown commands are logged with a
 leading `?` and otherwise ignored, because the protocol has no error channel.
 
-**Wrong bandwidth.** PAT's `BW...` command wins over the host's `--bandwidth`
-default. `halcyon-switch on --bandwidth 500` writes that value into PAT's
-configuration as well.
+**Wrong bandwidth.** PAT's `BW...` command selects the bandwidth, but a host
+started at 500 treats it as a hard ceiling: a later `BW2300`/`BW2750` is
+clamped to 500, while deep/nano remain available at low S/N. Start the host at
+2300 or 2750 if you want the wide profile. `halcyon-switch on --bandwidth 500`
+writes that value into PAT's configuration as well. Each step down or back up
+the ladder is recorded in the host's log while a link is up, for example
+`(fallback compact -> deep 375 Hz at S/N -8.0 dB)` and
+`(recovery deep -> compact 492 Hz at S/N -2.0 dB)`. A rung below the 3 dB
+margin target starts a warning and a return above it closes the episode, for
+example `(low margin: L0 8FSK 1/4 at S/N -13.0 dB, +1.7 dB vs 3 dB target)`
+and `(margin recovered: L4 BPSK 1/4 L2 at S/N +20.0 dB, +27.0 dB vs 3 dB target,
+after 1.4 s)`. The recovery line includes how long the margin stayed below
+the target since the warning; while the episode is active, the host status
+reports the running count in `mcs_margin_low_s`.
 
 ## Switching between modems
 
