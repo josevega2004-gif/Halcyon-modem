@@ -402,12 +402,19 @@ class HermesLite:
         block = per_frame / 48_000.0
         per_block = max(1, int(round(self.rate / 48_000.0)))
         words_per_frame = per_frame * 8
+        # time.sleep() overshoots by up to a millisecond here, which on a 2.625 ms
+        # block costs a whole frame per block at 384 kHz -- 2274 frames a second
+        # instead of 3048.  Sleep the bulk of the wait, spin the last half
+        # millisecond onto the deadline.
+        spin = 0.0005
         i = 0
         next_at = time.perf_counter()
         while not self._stop.is_set():
             now = time.perf_counter()
             if now < next_at:
-                time.sleep(next_at - now)
+                wait = next_at - now
+                if wait > spin:
+                    time.sleep(wait - spin * 0.5)
                 continue
             next_at = max(next_at + block, now - block)
             with self._lock:
