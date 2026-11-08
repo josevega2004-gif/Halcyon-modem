@@ -279,7 +279,7 @@ const CHANNEL_LABEL = { awgn: 'AWGN', good: 'Good fading', moderate: 'Moderate f
 const CHANNEL_BTN = { awgn: 'AWGN', good: 'Good', moderate: 'Mod.', poor: 'Poor' };
 
 function fmtDb(v) { return (v >= 0 ? '+' : '') + v.toFixed(1) + ' dB'; }
-function esc(s) { return String(s).replace(/[&<>]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;' }[c])); }
+function esc(s) { return String(s).replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c])); }
 
 async function boot() {
   const r = await fetch('/api/modes');

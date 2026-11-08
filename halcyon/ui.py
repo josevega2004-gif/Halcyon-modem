@@ -25,9 +25,8 @@ from urllib.parse import parse_qs, urlparse
 import numpy as np
 
 from . import config as settings
-from .bench import info_rate_bps
 from .channel import make_channel
-from .frame import MAX_BLOCKS, chunk_bits, header_repeat, mcs, table_for
+from .frame import MAX_BLOCKS, chunk_bits, header_repeat, info_rate_bps, mcs, table_for
 from .hl2 import HermesLite, discover, spectrum_row
 from .link import Link, LinkConfig
 from .tci import TciClient
@@ -566,8 +565,8 @@ def _services_start(req: dict) -> dict:
             srv.start()
         except OSError as exc:
             raise ValueError(
-                f"could not open the host ports 8300/8301: {exc} — is another modem or "
-                f"another modem already listening?"
+                f"could not open the host ports {srv.cmd_port}/{srv.data_port}: {exc} "
+                f"— is another modem already listening?"
             ) from exc
         _HOST = srv
     return services_status()
@@ -765,6 +764,13 @@ class Api(BaseHTTPRequestHandler):
 
     def do_GET(self) -> None:  # noqa: N802
         u = urlparse(self.path)
+        # Reads are checked too: a name that resolves to loopback (DNS
+        # rebinding) must not be able to read the console's state.
+        if not _origin_allowed(
+            None, self.headers.get("Host"), str(self.server.server_address[0])
+        ):
+            self.close_connection = True
+            return self._fail("cross-origin requests are refused", 403)
         pages = {"/": STATION, "/station": STATION}
         if settings.developer():
             # The lab console is an instrument, not part of the terminal: it is
@@ -831,9 +837,17 @@ class Api(BaseHTTPRequestHandler):
         ):
             self.close_connection = True
             return self._fail("cross-origin requests are refused", 403)
+        if self.headers.get("Transfer-Encoding"):
+            # A chunked body has no length this handler can bound, and reading
+            # it as if it did would leave framing bytes in the socket.
+            self.close_connection = True
+            return self._fail("chunked bodies are not supported", 411)
         try:
             length = int(self.headers.get("Content-Length") or 0)
         except ValueError:
+            return self._fail("bad Content-Length")
+        if length < 0:
+            self.close_connection = True
             return self._fail("bad Content-Length")
         if length > MAX_BODY:
             self.close_connection = True
@@ -892,6 +906,14 @@ def main(argv: list[str] | None = None) -> None:
     ap.add_argument("--host", default="127.0.0.1")
     ap.add_argument("--port", type=int, default=8730)
     args = ap.parse_args(argv)
+    if args.host not in _LOOPBACK_HOSTS:
+        # The API can key a transmitter, and the origin checks refuse every POST
+        # from a page not served on the loopback address: binding a network
+        # interface would only produce a page that half works.
+        ap.error(
+            "the console binds loopback only; it is a local control surface, "
+            "not a network service"
+        )
     srv = ThreadingHTTPServer((args.host, args.port), Api)
     srv.daemon_threads = True
     print(f"Halcyon console: http://{args.host}:{args.port}/   (Ctrl-C to stop)", flush=True)

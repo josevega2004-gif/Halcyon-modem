@@ -93,3 +93,12 @@ def test_decode_caps_the_message_at_the_burst_capacity():
     out = _decode({"profile": "wide", "mcs": 0, "text": "x" * 5000, "snr": 30.0, "looks": 0})
     assert out["trimmed"] is True
     assert out["sent"]["bytes"] == out["sent"]["block_bits"] // 8 * 12
+
+
+def test_the_console_refuses_to_bind_a_network_interface():
+    import pytest
+
+    from halcyon.ui import main
+
+    with pytest.raises(SystemExit):
+        main(["--host", "0.0.0.0", "--port", "0"])

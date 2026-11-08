@@ -388,9 +388,17 @@ const S = {
    and answers these two calls from it; served from the console they stay fetches. */
 const BUNDLE = window.HALCYON_BUNDLE || null;
 
+/* The server answers an error with JSON too, so a rejected request must not be
+   mistaken for a result: anything but OK carries the error text to the caller. */
+async function readJson(r) {
+  const body = await r.json().catch(() => ({}));
+  if (!r.ok) throw new Error(body.error || `request failed (HTTP ${r.status})`);
+  return body;
+}
+
 async function apiGet(path) {
   if (BUNDLE) return BUNDLE.modes;
-  return fetch(path).then(r => r.json());
+  return fetch(path).then(readJson);
 }
 
 async function apiPost(path, body) {
@@ -398,7 +406,7 @@ async function apiPost(path, body) {
     return fetch(path, {
       method: 'POST', headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(body)
-    }).then(r => r.json());
+    }).then(readJson);
   }
   if (path !== '/api/decode') return { error: 'the single-file build has no radio' };
   const levels = (BUNDLE.bursts || {})[body.profile] || {};
@@ -425,7 +433,7 @@ const BAND = [
   { id: 'micro', label: '175', hz: 175, name: 'Micro test' },
 ];
 const fmt = v => (v >= 0 ? '+' : '') + v.toFixed(1);
-const esc = s => String(s).replace(/[&<>]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;' }[c]));
+const esc = s => String(s).replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
 const now = () => new Date().toTimeString().slice(0, 8);
 
 /* --------------------------------------------------------------- HL2 radio */
@@ -435,7 +443,7 @@ function radioPost(path, body) {
   return fetch(path, {
     method: 'POST', headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(body || {})
-  }).then(r => r.json());
+  }).then(readJson);
 }
 
 async function radioStatus() {
