@@ -38,6 +38,10 @@ for d in "$dest"/debs/qemu-user*.deb; do
 done
 
 echo "==> toolchain ready: $dest/root"
-ls "$dest"/root/usr/bin/ | grep -E 'aarch64-linux-gnu-g\+\+|^qemu-aarch64$' || true
+shopt -s nullglob
+for bin in "$dest"/root/usr/bin/aarch64-linux-gnu-g++ "$dest"/root/usr/bin/qemu-aarch64; do
+    printf '%s\n' "${bin##*/}"
+done
+shopt -u nullglob
 echo
 echo "next: CROSS_ROOT=$dest/root $here/build_deb.sh --arch arm64"
