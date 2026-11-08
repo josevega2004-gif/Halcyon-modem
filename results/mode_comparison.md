@@ -1,8 +1,10 @@
-# Mode, speed and S/N: Halcyon vs xara
+# Mode, speed and S/N: Halcyon vs xara and Mercury
 
-All S/N figures are channel signal-to-noise ratio in a 2.742 kHz passband, at the per-mode threshold: block error <= 10 % for Halcyon, and the level's decode threshold for xara. Halcyon's wide rows are `results/thresholds_awgn.md`, and the README table and `frame.py`'s wide `snr_channel` use the same values; its narrow profiles are measured in their own bands and converted at fixed noise density by 10 log10(2742.1875 / B). Speeds are mode rates, not measured ARQ link goodput.
+All S/N figures are channel signal-to-noise ratio in a 2.742 kHz passband, at the per-mode threshold: block error <= 10 % for Halcyon, the level's decode threshold for xara, and either Mercury's rung threshold or its measured 90 % AWGN delivery, as marked. Halcyon's wide rows are `results/thresholds_awgn.md`, and the README table and `frame.py`'s wide `snr_channel` use the same values; its narrow profiles are measured in their own bands and converted at fixed noise density by 10 log10(2742.1875 / B). Speeds are mode rates, not measured ARQ link goodput.
 
 xara's level table in the local xara tree (`~/xara/crates/xara-phy/src/hf/level.rs`) is pinned to its vectors (`~/xara/vectors/levels.json`) by `tests/levels.rs::all_records`, which compares the full records including `thr` and `netbps`. These are the level table's thresholds, not an independent measurement of xara. Its reported-S/N axis uses a 2.5 kHz reference (`REF_2500_DB`); the last column subtracts 0.40 dB for 2.742 kHz. The table is therefore the ladder xara implements.
+
+Mercury's rows are from Rhizomatica's Mercury HF modem at commit [`fc2b88c`](https://github.com/Rhizomatica/mercury/tree/fc2b88c68d725113d22671c2f1b646294fa99660): the measured table in [`docs/MODES.md`](https://github.com/Rhizomatica/mercury/blob/fc2b88c68d725113d22671c2f1b646294fa99660/docs/MODES.md) and the `ARQ_SNR_MIN_*` values in [`datalink_arq/arq_protocol.h`](https://github.com/Rhizomatica/mercury/blob/fc2b88c68d725113d22671c2f1b646294fa99660/datalink_arq/arq_protocol.h), read 2026-11-08. Mercury reports S/N in 3 kHz; the 2.742 kHz column adds 0.39 dB. `ARQ rung` is Mercury's own start-rung threshold, not a 10 % block-error measurement; the two MFSK floors use their measured 90 % AWGN delivery points instead. DATAC16 is control-only and is not listed. All of these modes fit inside the 2.742 kHz channel.
 
 `mini` and `micro` are bench/console profiles only, not host fallbacks: their 600-byte link goodput measured 1.4–1.9 bps, below the 6 bps floor. The host ladder stops at `nano`.
 
@@ -94,3 +96,18 @@ xara's level table in the local xara tree (`~/xara/crates/xara-phy/src/hf/level.
 | 2750 Hz | 15 | OFDM 3b r6 | 5817 bps | +14.0 dB | +13.6 dB |
 | 2750 Hz | 16 | OFDM 4b r7 | 7074 bps | +15.0 dB | +14.6 dB |
 | 2750 Hz | 17 | OFDM 5b r6 | 8489 bps | +18.0 dB | +17.6 dB |
+
+## Mercury
+
+| Occupied | Mode | Payload rate | S/N (3 kHz) | S/N (2.742 kHz) | Basis |
+|---:|---|---:|---:|---:|---|
+| 500 Hz | MFSK500 | ~31 bps | -14.1 dB | -13.7 dB | 90 % AWGN |
+| 1000 Hz | MFSK | ~60 bps | -11.1 dB | -10.7 dB | 90 % AWGN |
+| 187 Hz | DATAC15 | 68 bps | -7.0 dB | -6.6 dB | ARQ rung |
+| 250 Hz | DATAC4 | 87 bps | -6.0 dB | -5.6 dB | ARQ rung |
+| 562 Hz | DATAC3 | 321 bps | -1.0 dB | -0.6 dB | ARQ rung |
+| 1687 Hz | DATAC1 | 980 bps | +3.0 dB | +3.4 dB | ARQ rung |
+| 2062 Hz | DATAC17 | 1410 bps | +7.0 dB | +7.4 dB | ARQ rung |
+| 2062 Hz | QAM16C2 | 3100 bps | +13.0 dB | +13.4 dB | ARQ rung |
+
+`MFSK500` is the floor of a BW500 session; the 1 kHz `MFSK` is the floor of a wide session. The payload rates are Mercury's own mode rates, not measured ARQ goodput.
