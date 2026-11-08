@@ -267,6 +267,40 @@ def test_a_reset_probe_reconnects_instead_of_failing_the_open():
         srv.stop()
 
 
+class ChattyRig(FakeRig):
+    """Leaves a dump unfinished, then answers the next command normally.
+
+    A dump that ends on silence can stop between lines, so whatever arrived
+    after the last newline is still buffered when the dump returns.  If it were
+    kept, the next answer would start with it: a frequency of 7_074_000 would
+    read back as 37_074_000.
+    """
+
+    def _answer(self, conn, cmd: str) -> None:
+        if cmd.startswith("\\dump_state"):
+            conn.sendall(b"1\n0\n3")  # the last line never gets its newline
+        elif cmd == "f":
+            conn.sendall(b"7074000\n")
+        else:
+            super()._answer(conn, cmd)
+
+
+def test_a_half_read_dump_is_not_answered_as_the_next_command():
+    srv = ChattyRig()
+    srv.start()
+    try:
+        rig = Rigctld(port=srv.port, timeout=0.3).open()
+        try:
+            assert rig.dump_state() == ["1", "0"]
+            assert rig.get_freq() == 7_074_000
+            mode, passband = rig.get_mode()
+            assert (mode, passband) == ("USB", 2400)
+        finally:
+            rig.close()
+    finally:
+        srv.stop()
+
+
 def test_service_without_a_session_is_disconnected():
     svc = RigService()
     st = svc.status()
