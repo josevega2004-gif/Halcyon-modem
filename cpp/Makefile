@@ -2,13 +2,21 @@ CXX ?= g++
 CXXFLAGS ?= -O2 -std=c++17 -Wall -Wextra -Iinclude
 BUILD := build
 BIN := $(BUILD)/halcyon-modem
+TUI := $(BUILD)/halcyon-tui
 
-.PHONY: all clean selftest tables
+.PHONY: all clean selftest tables tui
 
-all: $(BIN)
+all: $(BIN) $(TUI)
 
 $(BIN): src/halcyon.cpp src/main.cpp include/halcyon.hpp include/halcyon_tables.hpp | $(BUILD)
 	$(CXX) $(CXXFLAGS) -o $@ src/halcyon.cpp src/main.cpp
+
+# A terminal front end for the Python console: no browser, no third-party
+# dependency, just the loopback API.
+$(TUI): src/tui.cpp | $(BUILD)
+	$(CXX) $(CXXFLAGS) -o $@ src/tui.cpp
+
+tui: $(TUI)
 
 $(BUILD):
 	mkdir -p $(BUILD)

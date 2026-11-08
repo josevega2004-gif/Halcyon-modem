@@ -65,6 +65,26 @@ modem with
 PYTHONPATH=. python3 tools/build_standalone.py
 ```
 
+### Terminal front end
+
+Not every machine the station runs from has a browser, so the C++ side carries
+a terminal front end.  It is a client of the same loopback API rather than a
+second modem, so start the console first:
+
+```bash
+make -C cpp tui
+python -m halcyon.ui --port 8730
+./cpp/build/halcyon-tui                  # --url http://127.0.0.1:8730
+```
+
+It draws the radio, host, CAT and TCI status, the current profile and rung, the
+receiver spectrum (or the waterfall of the last burst) and a transcript.  Keys:
+`m` send a message through the simulated channel, `p` next profile, `+`/`-` a
+rung, `l` an ARQ transfer, `s` start or stop the modem host, `d` discover and
+connect the first HL2, `x` disconnect it, `r` refresh, `q` quit.  `--once`
+prints one frame and exits and `--send TEXT` works with it, so the terminal view
+is scriptable; a piped stdout does the same.
+
 `/console` is the bench view: frame anatomy, the capture as a waterfall and
 spectrum, per-block CRC results, the offset the synchroniser found, a chart of
 rate against measured threshold, and a short ARQ transfer with goodput.  Ticking
