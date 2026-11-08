@@ -26,6 +26,7 @@ class FakeRig(threading.Thread):
         self.passband = 2400
         self.ptt = 0
         self.reject = None
+        self.silent: str | None = None  # a command prefix to swallow, for timeouts
         self._stop = threading.Event()
 
     def run(self) -> None:
@@ -51,6 +52,8 @@ class FakeRig(threading.Thread):
         conn.close()
 
     def _answer(self, conn, cmd: str) -> None:
+        if self.silent and cmd.startswith(self.silent):
+            return
         if self.reject and cmd.startswith(self.reject):
             conn.sendall(b"RPRT -11\n")
             return
@@ -78,7 +81,7 @@ class FakeRig(threading.Thread):
         elif cmd.startswith("\\chk_vfo"):
             conn.sendall(b"CHKVFO 0\n")
         elif cmd.startswith("\\dump_state"):
-            conn.sendall(b"1\n0\n")
+            conn.sendall(b"1\n0\nRPRT 0\n")
         else:
             conn.sendall(b"RPRT -1\n")
 
@@ -249,3 +252,33 @@ def test_console_guards_cat_calls_without_a_session():
         _cat_set({"ptt": True})
     with pytest.raises(ValueError, match="no CAT session"):
         _cat_command({"line": "T 1"})
+
+
+def test_the_capability_dump_leaves_no_reply_behind(fake):
+    rig = Rigctld(port=fake.port).open()
+    try:
+        assert rig.dump_state() == ["1", "0"]
+        assert rig.get_freq() == 7_074_000
+        assert rig.get_mode() == ("USB", 2400)
+    finally:
+        rig.close()
+
+
+def test_raw_reads_a_multi_line_reply_to_its_end(fake):
+    rig = Rigctld(port=fake.port).open()
+    try:
+        assert rig.raw("\\dump_state") == ["1", "0"]
+        assert rig.get_freq() == 7_074_000
+    finally:
+        rig.close()
+
+
+def test_a_command_that_never_answers_closes_the_session(fake):
+    rig = Rigctld(port=fake.port, timeout=0.3).open()
+    try:
+        fake.silent = "f"
+        with pytest.raises(RigError, match="did not answer"):
+            rig.get_freq()
+        assert not rig.connected, "a half-read reply must not be reused"
+    finally:
+        rig.close()

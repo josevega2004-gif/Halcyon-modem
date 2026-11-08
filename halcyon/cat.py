@@ -26,15 +26,31 @@ treated as success.
 
 from __future__ import annotations
 
+import os
 import re
 import socket
 import subprocess
 import threading
 import time
+from pathlib import Path
 
 DEFAULT_HOST = "127.0.0.1"
 DEFAULT_PORT = 4532
 MODES = ("USB", "LSB", "CWU", "CWL", "AM", "FM", "NFM", "WFM", "RTTY", "DIGU", "DIGL", "PKTUSB")
+
+
+def log_path() -> Path:
+    base = os.environ.get("XDG_CACHE_HOME") or (Path.home() / ".cache")
+    return Path(base) / "halcyon" / "rigctld.log"
+
+
+def _tail(path: Path, limit: int = 400) -> str:
+    """The end of a log file, for an error message."""
+    try:
+        text = path.read_text(encoding="utf-8", errors="replace").strip()
+    except OSError:
+        return ""
+    return text[-limit:]
 
 
 class RigError(RuntimeError):
@@ -65,7 +81,7 @@ class Rigctld:
         self.port = int(port)
         self.timeout = float(timeout)
         self._sock: socket.socket | None = None
-        self._io = None
+        self._buf = b""  # bytes received but not yet handed out as a line
         self._lock = threading.Lock()
         self.error = ""
         self.vfo_mode = ""
@@ -85,7 +101,7 @@ class Rigctld:
             ) from exc
         sock.settimeout(self.timeout)
         self._sock = sock
-        self._io = sock.makefile("rb")
+        self._buf = b""
         try:
             reply = self.command("\\chk_vfo")
             self.vfo_mode = reply[0] if reply else ""
@@ -94,47 +110,96 @@ class Rigctld:
         return self
 
     def close(self) -> None:
-        io, self._io = self._io, None
         sock, self._sock = self._sock, None
-        for obj in (io, sock):
-            if obj is not None:
-                try:
-                    obj.close()
-                except OSError:
-                    pass
+        self._buf = b""
+        if sock is not None:
+            try:
+                sock.close()
+            except OSError:
+                pass
 
     @property
     def connected(self) -> bool:
         return self._sock is not None
 
     # -- transport ---------------------------------------------------------
-    def command(self, line: str, lines: int = 1) -> list[str]:
+    def _recv_line(self, timeout: float | None = None) -> str:
+        """One reply line, keeping whatever else arrived with it buffered."""
+        limit = self.timeout if timeout is None else timeout
+        deadline = time.monotonic() + max(0.0, limit)
+        while b"\n" not in self._buf:
+            remaining = deadline - time.monotonic()
+            if remaining <= 0:
+                raise TimeoutError
+            self._sock.settimeout(remaining)
+            chunk = self._sock.recv(4096)
+            if not chunk:
+                self.close()
+                raise RigError("rigctld closed the connection")
+            self._buf += chunk
+        line, _, self._buf = self._buf.partition(b"\n")
+        return line.decode("ascii", "replace").strip()
+
+    def _discard_stale(self) -> None:
+        """Drop the tail of a reply that was read only in part.
+
+        Nothing is in flight at the start of a command, so bytes sitting in the
+        socket belong to an earlier answer; reading them as this command's reply
+        is exactly how a session gets one command out of step.
+        """
+        self._buf = b""
+        if self._sock is None:
+            return
+        try:
+            self._sock.settimeout(0)
+            while self._sock.recv(4096):
+                pass
+        except (BlockingIOError, InterruptedError, OSError):
+            pass
+        finally:
+            if self._sock is not None:
+                self._sock.settimeout(self.timeout)
+
+    def command(self, line: str, lines: int | None = 1, idle: float | None = None) -> list[str]:
+        """Send one command and read its whole reply.
+
+        ``lines`` is how many lines a get command answers with.  ``None`` means
+        the reply length is not fixed: it ends at the ``RPRT`` terminator, or --
+        when ``idle`` is given -- when the socket goes quiet, which is the only
+        way to know a dump has finished on a rigctld that sends no terminator.
+
+        A reply is always consumed to its end, and a timeout closes the session:
+        a half-read reply left in the buffer would be answered to the next
+        command, and a driver one command out of phase is worse than a reconnect.
+        """
         with self._lock:
-            if self._sock is None or self._io is None:
+            if self._sock is None:
                 raise RigError("not connected to rigctld")
+            self._discard_stale()
             try:
                 self._sock.sendall((line + "\n").encode("ascii"))
             except OSError as exc:
                 self.close()
                 raise RigError(f"send to rigctld failed: {exc}") from exc
             out: list[str] = []
-            try:
-                while len(out) < lines:
-                    raw = self._io.readline()
-                    if not raw:
-                        raise RigError("rigctld closed the connection")
-                    text = raw.decode("ascii", "replace").strip()
-                    if text.startswith("RPRT"):
-                        parts = text.split()
-                        code = int(parts[1]) if len(parts) > 1 else -1
-                        if code != 0:
-                            raise RigError(f"rigctld rejected {line!r}: {text}", code)
+            while lines is None or len(out) < lines:
+                try:
+                    text = self._recv_line(idle if lines is None and out else None)
+                except TimeoutError as exc:
+                    if lines is None and out:
                         return out
+                    self.close()
+                    raise RigError(
+                        f"rigctld did not answer {line!r} within {self.timeout}s"
+                    ) from exc
+                if text.startswith("RPRT"):
+                    parts = text.split()
+                    code = int(parts[1]) if len(parts) > 1 else -1
+                    if code != 0:
+                        raise RigError(f"rigctld rejected {line!r}: {text}", code)
+                    return out
+                if text:
                     out.append(text)
-            except socket.timeout as exc:
-                raise RigError(
-                    f"rigctld did not answer {line!r} within {self.timeout}s"
-                ) from exc
             return out
 
     # -- reading -----------------------------------------------------------
@@ -160,7 +225,8 @@ class Rigctld:
         return self.strength
 
     def dump_state(self) -> list[str]:
-        return self.command("\\dump_state", lines=1)
+        """The capability dump: many lines, ending with the RPRT terminator."""
+        return self.command("\\dump_state", lines=None)
 
     # -- writing -----------------------------------------------------------
     def set_freq(self, hz: float) -> None:
@@ -196,12 +262,13 @@ class Rigctld:
 
         One command per call: a second line would be read as the answer to the
         first, so it is rejected here rather than silently desynchronising the
-        socket.  Multi-line replies are truncated to the first line.
+        socket.  The reply is read until the socket goes quiet, so a multi-line
+        dump comes back whole and the next command still gets its own answer.
         """
         text = line.strip()
         if not text or "\n" in text or "\r" in text:
             raise RigError("one rigctld command per line")
-        return self.command(text, lines=1)
+        return self.command(text, lines=None, idle=0.2)
 
     # -- reporting ---------------------------------------------------------
     def status(self) -> dict:
@@ -248,12 +315,17 @@ class RigService:
             cmd += ["-r", device]
         if baud:
             cmd += ["-s", str(int(baud))]
-        try:
-            self.proc = subprocess.Popen(
-                cmd, stdout=subprocess.DEVNULL, stderr=subprocess.PIPE
-            )
-        except FileNotFoundError as exc:
-            raise RigError("rigctld is not installed; install Hamlib") from exc
+        log = log_path()
+        log.parent.mkdir(parents=True, exist_ok=True)
+        # rigctld's chatter goes to a file rather than a pipe: nobody drains a
+        # pipe here, and a rigctld that fills one stalls mid-command.
+        with open(log, "ab") as handle:
+            try:
+                self.proc = subprocess.Popen(
+                    cmd, stdout=subprocess.DEVNULL, stderr=handle
+                )
+            except FileNotFoundError as exc:
+                raise RigError("rigctld is not installed; install Hamlib") from exc
         self.model = int(model)
         self.device = device or ""
         self.baud = int(baud) if baud else None
@@ -261,15 +333,24 @@ class RigService:
         for _ in range(40):
             time.sleep(0.05)
             if self.proc.poll() is not None:
-                err = (self.proc.stderr.read() or b"").decode("utf-8", "replace").strip()
                 self.proc = None
-                raise RigError(f"rigctld exited on start: {err[:200] or 'no output'}")
+                raise RigError(
+                    f"rigctld exited on start: {_tail(log) or 'no output'}; log {log}"
+                )
             try:
                 with socket.create_connection((DEFAULT_HOST, port), timeout=0.2):
                     return
             except OSError:
                 continue
-        raise RigError(f"rigctld did not start listening on {port}")
+        # A rigctld that never opened the port cannot be used, so do not leave it
+        # running behind a failure the caller only sees as an exception.
+        self.proc.terminate()
+        try:
+            self.proc.wait(timeout=2.0)
+        except subprocess.TimeoutExpired:
+            self.proc.kill()
+        self.proc = None
+        raise RigError(f"rigctld did not start listening on {port}; log {log}")
 
     def connect(self, host: str = DEFAULT_HOST, port: int = DEFAULT_PORT,
                 model: int | None = None, device: str | None = None,
