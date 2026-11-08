@@ -85,6 +85,21 @@ connect the first HL2, `x` disconnect it, `r` refresh, `q` quit.  `--once`
 prints one frame and exits and `--send TEXT` works with it, so the terminal view
 is scriptable; a piped stdout does the same.
 
+### Qt 6 window
+
+Where there is a display, the same console also has a Qt 6 window, again a
+client of the loopback API:
+
+```bash
+make -C cpp gui              # needs Qt 6 Widgets and Network (qt6-base-dev)
+./cpp/build/halcyon-gui      # --url http://127.0.0.1:8730
+```
+
+It shows the status rows, the receiver spectrum or the last burst's waterfall,
+the transcript, and controls for profile, rung, frequency, messages, link
+tests, the host service and HL2 discovery.  Qt is optional: plain `make` and
+`make -C cpp selftest` neither build nor need it.
+
 `/console` is the bench view: frame anatomy, the capture as a waterfall and
 spectrum, per-block CRC results, the offset the synchroniser found, a chart of
 rate against measured threshold, and a short ARQ transfer with goodput.  Ticking
