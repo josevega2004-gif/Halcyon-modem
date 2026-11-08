@@ -7,6 +7,7 @@ import socket
 import threading
 from http.client import HTTPConnection
 from http.server import ThreadingHTTPServer
+from pathlib import Path
 
 import numpy as np
 import pytest
@@ -305,3 +306,26 @@ def test_a_same_origin_post_reaches_its_route(console):
     assert json.loads(body) == {"connected": False}
     assert headers["content-type"] == "application/json"
     assert headers["cache-control"] == "no-store"
+
+
+def test_the_radio_connect_payload_carries_no_receiver_count(console):
+    """The server always opens one stream, so the page must not send a count."""
+    status, _, body = _http(console, "GET", "/", headers={"Host": "127.0.0.1:8730"})
+    assert status == 200
+    page = body.decode()
+    connect = page[
+        page.index("async function connectRadio"):
+        page.index("async function disconnectRadio")
+    ]
+    assert "radioPost('/api/radio/connect'" in connect
+    assert "receivers" not in connect
+
+    # The single-file build duplicates this function, so it has to agree.
+    standalone = (
+        Path(__file__).resolve().parents[1] / "halcyon" / "ui" / "halcyon-standalone.html"
+    ).read_text()
+    built = standalone[
+        standalone.index("async function connectRadio"):
+        standalone.index("async function disconnectRadio")
+    ]
+    assert "receivers" not in built
