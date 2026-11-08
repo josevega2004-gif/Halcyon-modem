@@ -74,4 +74,9 @@ else
     fi
 fi
 
-exec xdg-open "$URL"
+# A headless box has no browser to open, and a launcher that dies there looks
+# like a failed start even though the console and host are up.
+if ! { command -v xdg-open >/dev/null 2>&1 && xdg-open "$URL" >/dev/null 2>&1; }; then
+    logf "console at $URL"
+    printf 'Halcyon console is up: %s\n' "$URL"
+fi
