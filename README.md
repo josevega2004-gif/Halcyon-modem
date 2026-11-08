@@ -95,6 +95,9 @@ make -C cpp gui              # needs Qt 6 Widgets and Network (qt6-base-dev)
 ./cpp/build/halcyon-gui      # --url http://127.0.0.1:8730
 ```
 
+![The Qt 6 window: status rows, the waterfall of a decoded burst on the left and
+its transcript on the right](docs/halcyon-gui.png)
+
 It shows the status rows, the receiver spectrum or the last burst's waterfall,
 the transcript, and controls for profile, rung, frequency, messages, link
 tests, the host service and HL2 discovery.  Qt is optional: plain `make` and
