@@ -140,7 +140,12 @@ if [ "$arch" = "$(dpkg --print-architecture)" ] \
     install -m 0755 "$build/cpp/halcyon-gui" "$pkgroot/usr/bin/halcyon-gui"
     elfs+=("$pkgroot/usr/bin/halcyon-gui")
     gui_built=1
-    gui_depends=", libqt6widgets6, libqt6network6, qt6-qpa-plugins"
+    # The window carries the Qt minor version it was linked against as symbol
+    # versions, so an unversioned dependency would let apt install it beside a
+    # Qt too old to load it.  Require at least the headers it was built with.
+    qt_version=$(pkg-config --modversion Qt6Widgets)
+    [ -n "$qt_version" ] || { echo "build_deb.sh: cannot read the Qt version" >&2; exit 1; }
+    gui_depends=", libqt6widgets6 (>= $qt_version), libqt6network6 (>= $qt_version), qt6-qpa-plugins (>= $qt_version)"
 else
     echo "==> halcyon-gui skipped: Qt 6 for $arch is not available on this build host"
 fi

@@ -34,7 +34,8 @@ so the two packages can never disagree about it.
 `Depends: python3, python3-numpy, python3-scipy`; `Recommends: hamlib-utils`
 for CAT control, since `rigctld` only matters if you drive a rig through it.  A
 package that carries the Qt window also depends on `libqt6widgets6`,
-`libqt6network6` and `qt6-qpa-plugins`.
+`libqt6network6` and `qt6-qpa-plugins`, each at least the Qt version the window
+was built against (so a Qt 6.10 build will not install onto a Qt 6.4 system).
 
 The package is architecture-specific rather than `Architecture: all` only
 because of the C++ binaries; the console itself is pure Python.  `halcyon-tui`
