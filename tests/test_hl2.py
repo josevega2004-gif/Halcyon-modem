@@ -205,3 +205,25 @@ def test_resampling_moves_between_the_radio_and_the_modem_rate():
     assert _resample(x, 48_000, 12_000).size == 120
     assert _resample(x, 12_000, 48_000).size == 1920
     assert _resample(np.zeros(0, dtype=np.complex64), 48_000, 12_000).size == 0
+
+
+def test_receive_iq_uses_the_stride_of_a_multi_receiver_stream():
+    """Two receivers interleave their words; only receiver 0 is the modem's."""
+    pkt = bytearray(FRAME_BYTES)
+    pkt[0:2] = b"\xef\xfe"
+    pkt[2] = 0x01
+    pkt[3] = 0x06
+    stride = 6 * 2 + 2
+    per_sub = (512 - 8) // stride
+    for sub in (0, 1):
+        base = 8 + sub * 512 + 8
+        for k in range(per_sub):
+            off = base + k * stride
+            pkt[off : off + 3] = (1000).to_bytes(3, "big")
+            pkt[off + 3 : off + 6] = (0x1000000 - 2000).to_bytes(3, "big")
+            pkt[off + 6 : off + 9] = (3000).to_bytes(3, "big")
+            pkt[off + 9 : off + 12] = (0x1000000 - 4000).to_bytes(3, "big")
+    iq = parse_iq(bytes(pkt), receivers=2)
+    assert iq.size == 2 * per_sub
+    assert np.allclose(iq.real, 1000 / 8388607.0, atol=1e-6)
+    assert np.allclose(iq.imag, -2000 / 8388607.0, atol=1e-6)

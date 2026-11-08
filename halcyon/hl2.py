@@ -48,6 +48,7 @@ import socket
 import struct
 import threading
 import time
+from fractions import Fraction
 
 import numpy as np
 
@@ -195,14 +196,19 @@ def parse_iq(pkt: bytes, receivers: int = 1) -> np.ndarray:
     empty = np.zeros(0, dtype=np.complex64)
     if len(pkt) != FRAME_BYTES or pkt[0:2] != SYNC or pkt[3] != EP_RX:
         return empty
-    per_sub = (SUBBUF - 8) // (6 * receivers + 2)
+    # Every enabled receiver contributes 6 bytes (24-bit I then 24-bit Q) to a
+    # sample, and the two bytes after the last one carry the microphone word, so
+    # the stride depends on how many receivers the radio was told to stream.
+    # This client uses receiver 0; the rest are skipped rather than misread.
+    stride = 6 * max(1, int(receivers)) + 2
+    per_sub = (SUBBUF - 8) // stride
     out = []
     for sub in range(2):
         base = 8 + sub * SUBBUF + 8
-        seg = pkt[base : base + per_sub * 8]
-        if len(seg) < per_sub * 8:
+        seg = pkt[base : base + per_sub * stride]
+        if len(seg) < per_sub * stride:
             continue
-        w = np.frombuffer(seg, dtype=np.uint8).reshape(-1, 8)[:, :6].astype(np.int32)
+        w = np.frombuffer(seg, dtype=np.uint8).reshape(-1, stride)[:, :6].astype(np.int32)
         i = (w[:, 0] << 16) | (w[:, 1] << 8) | w[:, 2]
         q = (w[:, 3] << 16) | (w[:, 4] << 8) | w[:, 5]
         i = np.where(i & 0x800000, i - (1 << 24), i)
@@ -416,12 +422,9 @@ class HermesLite:
         """Key PTT, ship baseband IQ at `rate`, drop PTT.  Returns airtime."""
         iq = np.asarray(iq, dtype=np.complex64).ravel()
         if rate and abs(rate - self.rate) > 1e-6:
-            n = int(round(iq.size * self.rate / float(rate)))
-            if n < 2:
+            iq = resample(iq, float(rate), float(self.rate))
+            if iq.size < 2:
                 return 0.0
-            src = np.linspace(0.0, 1.0, iq.size, endpoint=False)
-            dst = np.linspace(0.0, 1.0, n, endpoint=False)
-            iq = (np.interp(dst, src, iq.real) + 1j * np.interp(dst, src, iq.imag)).astype(np.complex64)
         if iq.size == 0:
             return 0.0
         peak = float(np.max(np.abs(iq))) or 1.0
@@ -458,6 +461,32 @@ class HermesLite:
             "uptime_s": round(time.time() - self.started, 1) if self.started else 0.0,
             "error": self.last_error,
         }
+
+
+def resample(iq: np.ndarray, rate_in: float, rate_out: float) -> np.ndarray:
+    """Rate-convert TX IQ, filtering before changing the rate.
+
+    Linear interpolation is fine on the way up but has no anti-alias filter on
+    the way down, so images of the modem's passband would fold back into it.
+    scipy is a declared dependency; the linear path is only a fallback for a
+    partial install.
+    """
+    if not rate_in or not rate_out or int(round(rate_in)) == int(round(rate_out)):
+        return iq
+    if int(round(rate_in)) <= 0 or int(round(rate_out)) <= 0:
+        return iq
+    ratio = Fraction(int(round(rate_out)), int(round(rate_in))).limit_denominator(2000)
+    try:
+        from scipy.signal import resample_poly
+
+        return resample_poly(iq, ratio.numerator, ratio.denominator).astype(np.complex64)
+    except ImportError:  # pragma: no cover - scipy is a declared dependency
+        n = max(2, int(round(iq.size * float(ratio.numerator) / ratio.denominator)))
+        src = np.linspace(0.0, 1.0, iq.size, endpoint=False)
+        dst = np.linspace(0.0, 1.0, n, endpoint=False)
+        return (np.interp(dst, src, iq.real) + 1j * np.interp(dst, src, iq.imag)).astype(
+            np.complex64
+        )
 
 
 def spectrum_row(iq: np.ndarray, width: int = 400) -> list[int]:
