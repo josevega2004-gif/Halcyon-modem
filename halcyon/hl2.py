@@ -363,10 +363,17 @@ class HermesLite:
     # -- threads -----------------------------------------------------------
     def _run_tx(self) -> None:
         per_frame = (SUBBUF - 8) // 8 * 2  # 126 samples per 1032-byte frame
-        period = per_frame / float(self.rate)
+        # The watchdog only wants a frame every few milliseconds, so idle control
+        # frames go at the 48 kHz pace whatever the receive rate.  Pacing them at
+        # 126/rate put 3048 frames a second (3 MB/s) on the link at 384 kHz, where
+        # the radio shares it with its own receive stream.  Keyed frames keep
+        # following the radio's clock or the transmitted audio would play slow.
+        idle_period = per_frame / 48_000.0
         i = 0
         next_at = time.perf_counter()
         while not self._stop.is_set():
+            period = (per_frame / float(self.rate)
+                      if (self._mox or self._tx_iq.size) else idle_period)
             now = time.perf_counter()
             if now < next_at:
                 time.sleep(min(period, next_at - now))
