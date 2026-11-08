@@ -3,8 +3,8 @@
 Two binary packages, one per architecture:
 
 ```
-dist/halcyon_0.1.1-1_amd64.deb
-dist/halcyon_0.1.1-1_arm64.deb
+dist/halcyon_0.1.1-2_amd64.deb
+dist/halcyon_0.1.1-2_arm64.deb
 ```
 
 Build them with:

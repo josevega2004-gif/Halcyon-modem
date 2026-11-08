@@ -43,7 +43,11 @@ esac
 
 version=$(sed -n 's/^version[[:space:]]*=[[:space:]]*"\(.*\)"/\1/p' "$root/pyproject.toml" | head -1)
 [ -n "$version" ] || { echo "build_deb.sh: no version in pyproject.toml" >&2; exit 1; }
-deb_version="$version-1"
+# Revision 2 pins the Qt runtime dependencies to the version the window was
+# built with, so a package built against a newer Qt cannot be installed beside
+# an older one.
+deb_revision=2
+deb_version="$version-$deb_revision"
 
 # --- compiler -------------------------------------------------------------
 extra_flags=()
