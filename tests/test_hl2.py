@@ -1,8 +1,10 @@
 """HPSDR protocol 1 encoding, checked against the documented byte layout.
 
-There is no radio in this checkout, so these tests pin the wire format only:
+There is no radio assumed in this checkout, so these tests pin the wire format:
 discovery, the 1032-byte frame header, register packing and the IQ word order.
-Discovery and streaming themselves are unexercised.
+The last two tests do capture a real radio, and are opt-in (``HALCYON_HL2_TEST=1``)
+so that no ordinary run reaches for hardware; they check the samples-per-frame
+count against the receiver count, which is what the receive stride determines.
 """
 
 from __future__ import annotations
@@ -30,8 +32,9 @@ def reply(mac=b"\x00\x1c\xc0\xa2\x13\xdd", major=74, board=6, nrx=4, minor=2):
     p[3:9] = mac
     p[9] = major
     p[10] = board
-    p[13] = nrx
+    p[13] = 10  # real HL2 firmware 72.0 puts this here; it is not the rx count
     p[15] = minor
+    p[19] = nrx
     return bytes(p)
 
 
@@ -227,3 +230,104 @@ def test_receive_iq_uses_the_stride_of_a_multi_receiver_stream():
     assert iq.size == 2 * per_sub
     assert np.allclose(iq.real, 1000 / 8388607.0, atol=1e-6)
     assert np.allclose(iq.imag, -2000 / 8388607.0, atol=1e-6)
+
+
+# ------------------------------------------------------------- real hardware
+# Opt-in, because this needs a radio on the network: nothing here should surprise
+# an ordinary test run by reaching for hardware.
+#
+#     HALCYON_HL2_TEST=1 pytest tests/test_hl2.py -k hardware
+#
+# Set HALCYON_HL2_IP to choose a radio instead of waiting for discovery.
+
+def _live_radio() -> str:
+    """The address of the radio to test against, or a skip."""
+    import os
+
+    if os.environ.get("HALCYON_HL2_TEST", "").strip().lower() not in ("1", "yes", "on"):
+        pytest.skip("set HALCYON_HL2_TEST=1 to run the hardware capture test")
+    from halcyon import hl2
+
+    ip = os.environ.get("HALCYON_HL2_IP", "").strip()
+    if ip:
+        return ip
+    found = hl2.discover(1.5)
+    if not found:
+        pytest.skip("no Hermes Lite answered discovery on this network")
+    return found[0]["ip"]
+
+
+def _capture(ip: str, receivers: int, seconds: float = 0.8) -> tuple[np.ndarray, int, float]:
+    """Open the radio with `receivers` streams and measure one capture.
+
+    Returns the IQ the parser produced, how many 1032-byte frames it came from,
+    and how long the capture took -- enough to check both the samples a frame
+    and the rate they arrive at.
+    """
+    import time
+
+    from halcyon import hl2
+
+    radio = hl2.HermesLite(ip, rate=48_000, freq_hz=14_074_000.0, receivers=receivers)
+    radio.open()
+    try:
+        radio.capture(0.2)  # let the stream settle before counting frames
+        before = radio.rx_frames
+        started = time.monotonic()
+        samples = radio.capture(seconds)
+        elapsed = time.monotonic() - started
+        frames = radio.rx_frames - before
+    finally:
+        radio.close()
+    return samples, frames, elapsed
+
+
+def test_hardware_one_receiver_capture_is_126_samples_a_frame():
+    """63 samples a sub-frame, two sub-frames a frame, at the configured rate."""
+    samples, frames, elapsed = _capture(_live_radio(), receivers=1)
+
+    assert frames > 0, "the radio streamed no frames"
+    assert samples.size, "the parser produced no IQ"
+    per_frame = samples.size / frames
+    # The frame counter also counts a frame or two whose samples the settle
+    # capture above discarded, so this drifts by a frame either way.  The bug
+    # this is here to catch reads 126, far outside that.
+    assert abs(per_frame - 126) <= 3, f"{per_frame:.1f} samples a frame; one receiver is 126"
+    rate = samples.size / elapsed
+    assert abs(rate - 48_000) / 48_000 < 0.25, f"{rate:.0f} samples a second, expected 48 kHz"
+    assert np.all(np.isfinite(samples.real)) and np.all(np.isfinite(samples.imag))
+    # 24-bit samples are divided by 8388607, so the most negative value (-2**23)
+    # normalises to 1.0000001 rather than exactly 1.
+    peak = float(max(np.max(np.abs(samples.real)), np.max(np.abs(samples.imag))))
+    assert peak <= 1.0 + 1e-6, f"I or Q reached {peak:.3f} of full scale"
+    assert np.var(samples) > 0, "a constant stream is not IQ"
+
+
+def test_hardware_two_receivers_capture_is_72_samples_a_frame():
+    """Two receivers pack 14 bytes a sample, so a frame carries 72 of receiver 0.
+
+    That count is the invariant the stride bug broke: reading a two-receiver
+    frame with the single-receiver stride yields 126 samples a frame.  The
+    count alone would still look plausible against a buffer that was filled on
+    demand, so the rate is checked too -- but against what this radio does, not
+    against 48 kHz.  Measured on an HL2 running firmware 72.0: about 508 frames
+    a second, 36.6 kHz of receiver 0, with no kernel UDP drops and no change
+    from a 16 MB socket buffer, so the firmware is pacing the two-receiver
+    stream below 48 kHz.  The pre-fix stride lands near 27 kHz, below this band.
+    """
+    samples, frames, elapsed = _capture(_live_radio(), receivers=2)
+
+    assert frames > 0, "the radio streamed no frames with two receivers enabled"
+    assert samples.size, "the parser produced no IQ"
+    per_frame = samples.size / frames
+    # Same settle-capture drift as the one-receiver test; the pre-fix bug reads
+    # 126 here, so three frames of slack still leaves it nowhere to hide.
+    assert abs(per_frame - 72) <= 3, f"{per_frame:.1f} samples a frame; two receivers is 72"
+    rate = samples.size / elapsed
+    assert 30_000 < rate < 55_000, f"{rate:.0f} samples a second; two receivers on this radio is about 37 kHz"
+    assert np.all(np.isfinite(samples.real)) and np.all(np.isfinite(samples.imag))
+    # 24-bit samples are divided by 8388607, so the most negative value (-2**23)
+    # normalises to 1.0000001 rather than exactly 1.
+    peak = float(max(np.max(np.abs(samples.real)), np.max(np.abs(samples.imag))))
+    assert peak <= 1.0 + 1e-6, f"I or Q reached {peak:.3f} of full scale"
+    assert np.var(samples) > 0, "a constant stream is not IQ"

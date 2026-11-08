@@ -99,7 +99,11 @@ def parse_discovery(pkt: bytes, ip: str = "") -> dict | None:
         "board_id": board_id,
         "board": BOARDS.get(board_id, f"board 0x{board_id:02X}"),
         "firmware": f"{pkt[9]}.{pkt[15]}",
-        "receivers": max(1, pkt[13]),
+        # 0x13 is the "Number of Hardware Receivers" in the HL2 reply.  Byte
+        # 0x0D is not: a real HL2 on firmware 72.0 answers 10 there, which is
+        # not its DDC count (four on stock gateware) and cannot be a stream
+        # request either.
+        "receivers": max(1, pkt[19]),
         "busy": bool(pkt[2] & 0x01),
     }
 

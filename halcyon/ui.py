@@ -408,7 +408,10 @@ def _radio_connect(req: dict) -> dict:
             freq_hz=float(req.get("freq_hz", 14_105_000.0)),
             lna_db=int(req.get("lna_db", 16)),
             drive=int(req.get("drive", 8)),
-            receivers=int(req.get("receivers", 1)),
+            # The modem demodulates receiver 0, so ask for one stream even when
+            # discovery reports the gateware maximum (four on a stock HL2); the
+            # extra streams only cost bandwidth and are thrown away.
+            receivers=1,
             mac=str(req.get("mac", "")),
             board=str(req.get("board", "")),
             firmware=str(req.get("firmware", "")),
