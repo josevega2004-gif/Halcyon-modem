@@ -610,7 +610,7 @@ class HostServer:
                 if self.protocol.linked():
                     pending = bytes(buffered) + data
                     buffered.clear()
-                elif len(buffered) < MAX_BUFFERED:
+                elif len(buffered) + len(data) <= MAX_BUFFERED:
                     buffered.extend(data)
             elif self.protocol.linked() and buffered:
                 # The link came up between reads: flush what was queued for it.
@@ -619,11 +619,16 @@ class HostServer:
             if not pending:
                 continue
             back = self.protocol.carry(pending)
-            if self.echo and back:
-                try:
-                    conn.sendall(back)
-                except OSError:
-                    break
+            if back:
+                if self.echo:
+                    try:
+                        conn.sendall(back)
+                    except OSError:
+                        break
+            elif not self.protocol.linked() and len(buffered) + len(pending) <= MAX_BUFFERED:
+                # The link dropped between the check above and the transfer, so
+                # these bytes are still waiting for it, not lost.
+                buffered.extend(pending)
         try:
             conn.close()
         except OSError:
