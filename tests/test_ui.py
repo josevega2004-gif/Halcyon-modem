@@ -329,3 +329,25 @@ def test_the_radio_connect_payload_carries_no_receiver_count(console):
         standalone.index("async function disconnectRadio")
     ]
     assert "receivers" not in built
+
+
+def test_the_discovered_radio_card_shows_no_receiver_count(console):
+    """Discovery still reports the count, but the card must not advertise it."""
+    status, _, body = _http(console, "GET", "/", headers={"Host": "127.0.0.1:8730"})
+    assert status == 200
+    page = body.decode()
+    find = page[
+        page.index("async function radioFind"):
+        page.index("async function connectRadio")
+    ]
+    assert "d.radios.forEach" in find
+    assert "receivers" not in find
+
+    standalone = (
+        Path(__file__).resolve().parents[1] / "halcyon" / "ui" / "halcyon-standalone.html"
+    ).read_text()
+    built = standalone[
+        standalone.index("async function radioFind"):
+        standalone.index("async function connectRadio")
+    ]
+    assert "receivers" not in built
