@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import re
 import socket
 import threading
 from http.client import HTTPConnection
@@ -351,3 +352,17 @@ def test_the_discovered_radio_card_shows_no_receiver_count(console):
         standalone.index("async function connectRadio")
     ]
     assert "receivers" not in built
+
+
+def test_the_standalone_file_is_the_served_page_plus_one_bundle():
+    """The build injects the measured bundle and changes nothing else."""
+    ui = Path(__file__).resolve().parents[1] / "halcyon" / "ui"
+    source = (ui / "station.html").read_text()
+    built = (ui / "halcyon-standalone.html").read_text()
+    marker = "<script>\nconst $ = (s, r = document)"
+    assert marker in source
+
+    bundle = re.search(r"<script>window\.HALCYON_BUNDLE = .*?</script>\n", built, re.S)
+    assert bundle, "the standalone file carries no injected bundle"
+    assert built.count("<script>window.HALCYON_BUNDLE") == 1
+    assert built.replace(bundle.group(0), "", 1) == source
