@@ -149,6 +149,25 @@ def cc_slot(frame: bytearray, sub: int, addr: int, data: int, mox: bool = False,
     frame[base + 4 : base + 8] = (int(data) & 0xFFFFFFFF).to_bytes(4, "big")
 
 
+def iq_word_bytes(iq: np.ndarray) -> np.ndarray:
+    """Pack complex samples into the 8-byte words a TX sub-frame carries.
+
+    Four zero audio/EADDR bytes, then big-endian I16 and Q16.  Converting a
+    whole block in one call is what makes 384 kHz transmit affordable: the numpy
+    call overhead dominates at 126 samples, and 3048 frames a second leaves no
+    room for it once per frame.
+    """
+    iq = np.asarray(iq, dtype=np.complex64).ravel()
+    if iq.size == 0:
+        return np.zeros(0, dtype=np.uint8)
+    words = np.zeros((iq.size, 8), dtype=np.uint8)
+    i = np.rint(np.clip(np.real(iq), -1.0, 1.0) * 32767.0).astype(">i2")
+    q = np.rint(np.clip(np.imag(iq), -1.0, 1.0) * 32767.0).astype(">i2")
+    words[:, 4:6] = i.view(np.uint8).reshape(-1, 2)
+    words[:, 6:8] = q.view(np.uint8).reshape(-1, 2)
+    return words.reshape(-1)
+
+
 def pack_iq(frame: bytearray, iq: np.ndarray, mox: bool = False, seq: int = 0) -> int:
     """Lay 126 samples of TX baseband into the two sub-frames; return count used."""
     iq = np.asarray(iq, dtype=np.complex64).ravel()
@@ -160,18 +179,22 @@ def pack_iq(frame: bytearray, iq: np.ndarray, mox: bool = False, seq: int = 0) -
         used += chunk.size
         if chunk.size == 0:
             continue
-        i = np.clip(np.real(chunk), -1.0, 1.0) * 32767.0
-        q = np.clip(np.imag(chunk), -1.0, 1.0) * 32767.0
-        words = np.empty((chunk.size, 8), dtype=np.uint8)
-        words[:, 0:4] = 0  # audio / EADDR words: the HL2 ignores them
-        words[:, 4:6] = (np.rint(i).astype(">i2").view(np.uint8).reshape(-1, 2))
-        words[:, 6:8] = (np.rint(q).astype(">i2").view(np.uint8).reshape(-1, 2))
-        frame[base : base + chunk.size * 8] = words.tobytes()
+        frame[base : base + chunk.size * 8] = iq_word_bytes(chunk).tobytes()
     return used
 
 
+def _put_iq_bytes(frame: bytearray, raw: np.ndarray) -> None:
+    """Drop pre-packed sample words into the two 504-byte sub-frame areas."""
+    for sub in range(2):
+        chunk = raw[sub * 504 : (sub + 1) * 504]
+        if chunk.size:
+            base = 8 + sub * SUBBUF + 8
+            frame[base : base + chunk.size] = chunk.tobytes()
+
+
 def build_frame(seq: int, slots: list[tuple[int, int]], mox: bool = False,
-                tx: np.ndarray | None = None) -> bytes:
+                tx: np.ndarray | None = None,
+                tx_bytes: np.ndarray | None = None) -> bytes:
     """One 1032-byte host-to-radio frame carrying up to two register writes."""
     frame = bytearray(FRAME_BYTES)
     frame[0:2] = SYNC
@@ -186,6 +209,8 @@ def build_frame(seq: int, slots: list[tuple[int, int]], mox: bool = False,
         frame[base : base + 3] = b"\x7f\x7f\x7f"
     if tx is not None:
         pack_iq(frame, tx, mox=mox, seq=seq)
+    elif tx_bytes is not None:
+        _put_iq_bytes(frame, tx_bytes)
     return bytes(frame)
 
 
@@ -368,34 +393,52 @@ class HermesLite:
         # 126/rate put 3048 frames a second (3 MB/s) on the link at 384 kHz, where
         # the radio shares it with its own receive stream.  Keyed frames keep
         # following the radio's clock or the transmitted audio would play slow.
-        idle_period = per_frame / 48_000.0
+        # The radio works in 2.625 ms blocks: one 126-sample frame per block at
+        # 48 kHz and eight of them at 384 kHz.  time.sleep() cannot resolve much
+        # finer than half a millisecond here, and a spinning loop just fights the
+        # GIL, so a keyed block goes out as one burst instead of 3048 frames
+        # spread evenly across a second.  Idle control frames only have to feed
+        # the watchdog, so one per block is plenty however fast RX is running.
+        block = per_frame / 48_000.0
+        per_block = max(1, int(round(self.rate / 48_000.0)))
+        words_per_frame = per_frame * 8
         i = 0
         next_at = time.perf_counter()
         while not self._stop.is_set():
-            period = (per_frame / float(self.rate)
-                      if (self._mox or self._tx_iq.size) else idle_period)
             now = time.perf_counter()
             if now < next_at:
-                time.sleep(min(period, next_at - now))
+                time.sleep(next_at - now)
                 continue
-            next_at = max(next_at + period, now - period)
+            next_at = max(next_at + block, now - block)
             with self._lock:
-                slots = self._round_robin(i)
-                mox = self._mox
-                chunk = self._tx_iq[self._tx_pos : self._tx_pos + per_frame]
-                if chunk.size:
+                keyed = self._mox or self._tx_iq.size > 0
+                nframes = per_block if keyed else 1
+                raw = None
+                if keyed:
+                    need = per_frame * nframes
+                    chunk = self._tx_iq[self._tx_pos : self._tx_pos + need]
                     self._tx_pos += chunk.size
                     if self._tx_pos >= self._tx_iq.size:
                         self._tx_done.set()
-            i += 2
-            try:
-                self._sock.send(build_frame(self._seq, slots, mox=mox,
-                                            tx=chunk if chunk.size else None))
-                self._seq += 1
-                self.tx_frames += 1
-            except OSError as exc:
-                self.last_error = str(exc)
-                time.sleep(0.05)
+                    if chunk.size < need:  # tail of the burst: pad with silence
+                        chunk = np.concatenate(
+                            [chunk, np.zeros(need - chunk.size, dtype=np.complex64)]
+                        )
+                    raw = iq_word_bytes(chunk)
+                for k in range(nframes):
+                    slots = self._round_robin(i)
+                    i += 2
+                    seg = None if raw is None else raw[
+                        k * words_per_frame : (k + 1) * words_per_frame
+                    ]
+                    try:
+                        self._sock.send(build_frame(self._seq, slots, mox=self._mox,
+                                                    tx_bytes=seg))
+                        self._seq += 1
+                        self.tx_frames += 1
+                    except OSError as exc:
+                        self.last_error = str(exc)
+                        break
 
     def _run_rx(self) -> None:
         while not self._stop.is_set():
