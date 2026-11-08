@@ -499,7 +499,7 @@ async function radioFind() {
       const b = document.createElement('button');
       b.className = 'found';
       b.innerHTML = `<b>${esc(r.board)}</b><span>${esc(r.ip)} · ${esc(r.mac)}</span>` +
-                    `<em>fw ${esc(r.firmware)} · ${r.receivers} rx</em>`;
+                    `<em>fw ${esc(r.firmware)}</em>`;
       b.onclick = () => { $('#radIp').value = r.ip; connectRadio(r); };
       list.appendChild(b);
     });
@@ -518,7 +518,7 @@ async function connectRadio(found) {
   };
   if (found) {
     body.mac = found.mac; body.board = found.board;
-    body.receivers = found.receivers; body.firmware = found.firmware;
+    body.firmware = found.firmware;
   }
   $('#radConnect').disabled = true;
   try {
