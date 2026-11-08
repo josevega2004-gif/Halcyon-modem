@@ -54,7 +54,7 @@ case "$arch" in
     arm64)
         if [ -n "${CROSS_ROOT:-}" ]; then
             cxx="$CROSS_ROOT/usr/bin/aarch64-linux-gnu-g++-15"
-            [ -x "$cxx" ] || cxx=$(ls "$CROSS_ROOT"/usr/bin/aarch64-linux-gnu-g++* 2>/dev/null | head -1)
+            [ -x "$cxx" ] || cxx=$(find "$CROSS_ROOT/usr/bin" -maxdepth 1 -name 'aarch64-linux-gnu-g++*' -print -quit 2>/dev/null)
             [ -n "$cxx" ] || { echo "build_deb.sh: no compiler under CROSS_ROOT=$CROSS_ROOT" >&2; exit 1; }
             extra_flags+=("--sysroot=$CROSS_ROOT")
             shlibs=$(dirname "$(find "$CROSS_ROOT" -name 'libopcodes-*.so' | head -1)")
@@ -114,36 +114,65 @@ exec python3 -m halcyon.switch "$@"
 LAUNCHER
 chmod 0755 "$pkgroot/usr/bin/halcyon-switch"
 
-echo "==> building halcyon-modem"
+echo "==> building halcyon-modem and halcyon-tui"
 make -s -C "$root/cpp" BUILD="$build/cpp" CXX="$cxx" \
      CXXFLAGS="-O2 -std=c++17 -Wall -Wextra -I$root/cpp/include ${extra_flags[*]:-}" \
      >/dev/null
 install -m 0755 "$build/cpp/halcyon-modem" "$pkgroot/usr/bin/halcyon-modem"
+install -m 0755 "$build/cpp/halcyon-tui" "$pkgroot/usr/bin/halcyon-tui"
 # halcyon-modem reads its rate tables from this file at run time.
 install -d "$pkgroot/usr/share/halcyon"
 install -m 0644 "$root/cpp/data/wide.bin" "$pkgroot/usr/share/halcyon/wide.bin"
 
+# The Qt window needs Qt for the target, which a cross build does not have:
+# pkg-config would hand it the host's Qt.  Ship it on a native build instead,
+# and let the terminal front end cover the architectures without it.
+elfs=("$pkgroot/usr/bin/halcyon-modem" "$pkgroot/usr/bin/halcyon-tui")
+gui_built=0
+gui_depends=""
+if [ "$arch" = "$(dpkg --print-architecture)" ] \
+        && command -v pkg-config >/dev/null 2>&1 \
+        && pkg-config --exists Qt6Widgets Qt6Network 2>/dev/null; then
+    echo "==> building halcyon-gui"
+    make -s -C "$root/cpp" BUILD="$build/cpp" CXX="$cxx" \
+         CXXFLAGS="-O2 -std=c++17 -Wall -Wextra -I$root/cpp/include" \
+         gui >/dev/null
+    install -m 0755 "$build/cpp/halcyon-gui" "$pkgroot/usr/bin/halcyon-gui"
+    elfs+=("$pkgroot/usr/bin/halcyon-gui")
+    gui_built=1
+    gui_depends=", libqt6widgets6, libqt6network6, qt6-qpa-plugins"
+else
+    echo "==> halcyon-gui skipped: Qt 6 for $arch is not available on this build host"
+fi
+
 # Never ship a binary built for the wrong machine.
 want=x86-64; [ "$arch" = arm64 ] && want=aarch64
-got=$(file -b "$pkgroot/usr/bin/halcyon-modem")
-case "$got" in
-    *"$want"*) ;;
-    *) echo "build_deb.sh: halcyon-modem is not $want: $got" >&2; exit 1 ;;
-esac
+for binary in "${elfs[@]}"; do
+    got=$(file -b "$binary")
+    case "$got" in
+        *"$want"*) ;;
+        *) echo "build_deb.sh: ${binary##*/} is not $want: $got" >&2; exit 1 ;;
+    esac
+done
 
-# We ship an ELF, so policy wants a versioned libc6 dependency, and the version
-# has to be the one the binary actually references rather than a guess.  Read
+# We ship ELFs, so policy wants a versioned libc6 dependency, and the version
+# has to be the one the binaries actually reference rather than a guess.  Read
 # it before stripping, while every symbol version is still present.
 command -v strings >/dev/null 2>&1 || { echo "build_deb.sh: need strings to read the glibc requirement" >&2; exit 1; }
-glibc=$(strings "$pkgroot/usr/bin/halcyon-modem" \
-        | grep -oE 'GLIBC_[0-9]+(\.[0-9]+)*' | sed 's/GLIBC_//' | sort -V | tail -1)
-[ -n "$glibc" ] || { echo "build_deb.sh: cannot read the glibc requirement of halcyon-modem" >&2; exit 1; }
-echo "==> halcyon-modem needs libc6 >= $glibc"
+glibc=$(
+    for binary in "${elfs[@]}"; do
+        strings "$binary" | grep -oE 'GLIBC_[0-9]+(\.[0-9]+)*' | sed 's/GLIBC_//'
+    done | sort -V | tail -1
+)
+[ -n "$glibc" ] || { echo "build_deb.sh: cannot read the glibc requirement of the C++ binaries" >&2; exit 1; }
+echo "==> C++ binaries need libc6 >= $glibc"
 
-strip_tool=strip
+strip_tool=$(command -v strip)
 [ "$arch" = arm64 ] && [ -x "${CROSS_ROOT:-}/usr/bin/aarch64-linux-gnu-strip" ] \
     && strip_tool="$CROSS_ROOT/usr/bin/aarch64-linux-gnu-strip"
-"$strip_tool" --strip-unneeded "$pkgroot/usr/bin/halcyon-modem" 2>/dev/null || true
+for binary in "${elfs[@]}"; do
+    "$strip_tool" --strip-unneeded "$binary" 2>/dev/null || true
+done
 
 install -m 0644 "$here/copyright" "$pkgroot/usr/share/doc/halcyon/copyright"
 install -m 0644 "$here/config.example.json" \
@@ -156,8 +185,11 @@ install -m 0644 "$root/CREDITS.md" \
     "$pkgroot/usr/share/doc/halcyon/CREDITS.md"
 gzip -9n -c "$here/halcyon.1"        > "$pkgroot/usr/share/man/man1/halcyon.1.gz"
 gzip -9n -c "$here/halcyon-modem.1"  > "$pkgroot/usr/share/man/man1/halcyon-modem.1.gz"
+gzip -9n -c "$here/halcyon-tui.1"    > "$pkgroot/usr/share/man/man1/halcyon-tui.1.gz"
 gzip -9n -c "$here/halcyon-host.1"   > "$pkgroot/usr/share/man/man1/halcyon-host.1.gz"
 gzip -9n -c "$here/halcyon-switch.1" > "$pkgroot/usr/share/man/man1/halcyon-switch.1.gz"
+[ "$gui_built" = 1 ] && gzip -9n -c "$here/halcyon-gui.1" \
+    > "$pkgroot/usr/share/man/man1/halcyon-gui.1.gz"
 
 cat > "$pkgroot/usr/share/doc/halcyon/changelog.Debian" <<EOF
 halcyon ($deb_version) unstable; urgency=medium
@@ -174,11 +206,14 @@ chmod 0644 "$pkgroot/usr/share/doc/halcyon/changelog.Debian.gz"
 find "$pkgroot" -type d -exec chmod 0755 {} +
 find "$pkgroot" -type f -exec chmod 0644 {} +
 chmod 0755 "$pkgroot/usr/bin/halcyon" "$pkgroot/usr/bin/halcyon-modem" \
-           "$pkgroot/usr/bin/halcyon-host" "$pkgroot/usr/bin/halcyon-switch"
+           "$pkgroot/usr/bin/halcyon-tui" "$pkgroot/usr/bin/halcyon-host" \
+           "$pkgroot/usr/bin/halcyon-switch"
+[ "$gui_built" = 1 ] && chmod 0755 "$pkgroot/usr/bin/halcyon-gui"
 
 size=$(du -sk --exclude=DEBIAN "$pkgroot" | cut -f1)
 sed -e "s|@VERSION@|$deb_version|" -e "s|@ARCH@|$arch|" \
     -e "s|@MAINT@|$maint|" -e "s|@SIZE@|$size|" -e "s|@LIBC@|$glibc|" \
+    -e "s|@GUI_DEPENDS@|$gui_depends|" \
     "$here/control.in" > "$pkgroot/DEBIAN/control"
 chmod 0644 "$pkgroot/DEBIAN/control"
 

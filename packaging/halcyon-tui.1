@@ -1,0 +1,72 @@
+.TH HALCYON-TUI 1 "November 2026" "halcyon 0.1.1" "User Commands"
+.SH NAME
+halcyon-tui \\- terminal front end for the Halcyon console
+.SH SYNOPSIS
+.B halcyon-tui
+[\\fB\\-\\-url\\fR \\fIURL\\fR] [\\fB\\-\\-once\\fR] [\\fB\\-\\-send\\fR \\fITEXT\\fR]
+[\\fB\\-\\-link\\fR \\fITEXT\\fR]
+.SH DESCRIPTION
+.B halcyon-tui
+draws the station console in a terminal for machines that have no browser: a
+headless box or an SSH session.  It is a client of the loopback JSON API served
+by
+.BR halcyon (1),
+not a second modem, so the console has to be running first:
+.PP
+.RS 4
+python3 -m halcyon.ui --port 8730
+.RE
+.PP
+Status rows show the radio, the modem host, CAT and TCI, the current profile and
+speed level.  The scope pane shows the receiver spectrum (or the waterfall of
+the last burst) and the transcript records traffic and errors.  Messages, link
+tests and radio, host and CAT commands go through the console, so they behave as
+they do in the browser page.
+.SH OPTIONS
+.TP
+.BR \\-\\-url " " \\fIURL\\fR
+Console to attach to.  Defaults to \\fIhttp://127.0.0.1:8730\\fR.
+.TP
+.B \\-\\-once
+Draw one frame, print it and exit.  A piped standard output does the same.
+.TP
+.BR \\-\\-send " " \\fITEXT\\fR
+Send a message through the simulated channel and show what the console
+decoded.  Implies \\fB\\-\\-once\\fR.
+.TP
+.BR \\-\\-link " " \\fITEXT\\fR
+Run the console's adaptive link test.
+.SH KEYS
+.TP
+.B m
+Compose and send a message.
+.TP
+.B p
+Next profile; \\fB+\\fR and \\fB\\-\\fR move one speed level.
+.TP
+.B l
+Run an ARQ transfer.
+.TP
+.B s
+Start or stop the modem host.
+.TP
+.B d
+Discover and connect the first Hermes Lite 2; \\fBx\\fR disconnects it.
+.TP
+.B r
+Refresh the console state.
+.TP
+.B q
+Quit.
+.SH ENVIRONMENT
+.TP
+.B HALCYON_URL
+Console URL used when \\fB\\-\\-url\\fR is absent.
+.TP
+.B HALCYON_MYCALL
+Call sign reported when the terminal starts the modem host.
+.SH SEE ALSO
+.BR halcyon (1),
+.BR halcyon-gui (1)
+.SH AUTHOR
+The Halcyon authors.

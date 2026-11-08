@@ -1,0 +1,48 @@
+.TH HALCYON-GUI 1 "November 2026" "halcyon 0.1.1" "User Commands"
+.SH NAME
+halcyon-gui \\- Qt 6 window for the Halcyon console
+.SH SYNOPSIS
+.B halcyon-gui
+[\\fB\\-\\-url\\fR \\fIURL\\fR] [\\fB\\-\\-check\\fR] [\\fB\\-\\-send\\fR \\fITEXT\\fR]
+[\\fB\\-\\-screenshot\\fR \\fIFILE\\fR]
+.SH DESCRIPTION
+.B halcyon-gui
+is the station console as a native Qt 6 window: status rows, a pane showing the
+receiver spectrum or the waterfall of the last burst, a transcript, and controls
+for the profile, speed level, frequency, messages, link tests, the modem host
+and Hermes Lite 2 discovery.  It is a client of
+.BR halcyon (1)'s
+loopback API, so the console must be running.
+.PP
+The package ships this window only where Qt 6 was available when it was built,
+which in practice means a native build.  On architectures whose package was
+cross-built, use
+.BR halcyon-tui (1)
+instead; it needs no display.
+.SH OPTIONS
+.TP
+.BR \\-\\-url " " \\fIURL\\fR
+Console to attach to.  Defaults to \\fIhttp://127.0.0.1:8730\\fR.
+.TP
+.B \\-\\-check
+Print the console state and exit without opening a window.
+.TP
+.BR \\-\\-send " " \\fITEXT\\fR
+Send a message through the simulated channel and show what the console
+decoded.
+.TP
+.BR \\-\\-screenshot " " \\fIFILE\\fR
+Draw the window, save it as a PNG and exit.  On a machine without a display,
+set \\fBQT_QPA_PLATFORM=offscreen\\fR.
+.SH ENVIRONMENT
+.TP
+.B HALCYON_URL
+Console URL used when \\fB\\-\\-url\\fR is absent.
+.TP
+.B HALCYON_MYCALL
+Call sign reported when the window starts the modem host.
+.SH SEE ALSO
+.BR halcyon (1),
+.BR halcyon-tui (1)
+.SH AUTHOR
+The Halcyon authors.

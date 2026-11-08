@@ -3,7 +3,7 @@ Version: @VERSION@
 Architecture: @ARCH@
 Maintainer: @MAINT@
 Installed-Size: @SIZE@
-Depends: libc6 (>= @LIBC@), python3 (>= 3.10), python3-numpy, python3-scipy
+Depends: libc6 (>= @LIBC@), python3 (>= 3.10), python3-numpy, python3-scipy@GUI_DEPENDS@
 Recommends: hamlib-utils
 Section: hamradio
 Priority: optional
@@ -12,10 +12,11 @@ Description: open HF data modem (OFDM + LDPC, 2.75 kHz)
  adaptive speed levels spanning 8.8 bit/s to about 8 kbit/s, all inside the
  2.8 kHz bandwidth that FCC 47 CFR 97.307(f)(3) allows on the amateur bands.
  .
- It brings a browser console for the waterfall, speed ladder and transcript;
- a host-mode TCP service so PAT, Winlink Express and VarAC can attach; clients
- for a Hermes Lite 2 and for TCI radios; and full CAT control of any rig that
- Hamlib's rigctld drives.
+ It brings a browser console for the waterfall, speed ladder and transcript; a
+ terminal front end (halcyon-tui) for machines without a browser and, where Qt
+ 6 is available, a Qt window (halcyon-gui); a host-mode TCP service so PAT,
+ Winlink Express and VarAC can attach; clients for a Hermes Lite 2 and for TCI
+ radios; and full CAT control of any rig that Hamlib's rigctld drives.
  .
  The package also installs halcyon-modem, a C++17 implementation of the modem
  core that decodes a 384 ms burst in about 45 ms.

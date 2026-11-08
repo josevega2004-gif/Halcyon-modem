@@ -25,16 +25,23 @@ so the two packages can never disagree about it.
 | --- | --- |
 | `/usr/bin/halcyon` | the console, `python3 -m halcyon.ui` |
 | `/usr/bin/halcyon-modem` | the C++17 modem core, compiled for this architecture |
+| `/usr/bin/halcyon-tui` | the terminal front end, for machines without a browser |
+| `/usr/bin/halcyon-gui` | the Qt 6 window, when Qt 6 was available for the build |
 | `/usr/lib/python3/dist-packages/halcyon/` | modem, link layer, radio clients, web UI |
 | `/usr/share/man/man1/halcyon*.1.gz` | man pages |
 | `/usr/share/doc/halcyon/` | copyright, changelog, PAT/VarAC guides, credits |
 
 `Depends: python3, python3-numpy, python3-scipy`; `Recommends: hamlib-utils`
-for CAT control, since `rigctld` only matters if you drive a rig through it.
+for CAT control, since `rigctld` only matters if you drive a rig through it.  A
+package that carries the Qt window also depends on `libqt6widgets6`,
+`libqt6network6` and `qt6-qpa-plugins`.
 
 The package is architecture-specific rather than `Architecture: all` only
-because of `halcyon-modem`; everything else is pure Python. Building for arm64
-therefore needs an aarch64 compiler — install `g++-aarch64-linux-gnu`, or let
+because of the C++ binaries; the console itself is pure Python.  `halcyon-tui`
+is POSIX-only and ships on every architecture; `halcyon-gui` is built only on a
+native build that has Qt 6 for the target, so an arm64 cross build carries the
+terminal front end instead of the window. Building for arm64 therefore needs an
+aarch64 compiler — install `g++-aarch64-linux-gnu`, or let
 `tools/get_cross_toolchain.sh` unpack the cross packages into `.toolchain/`
 (no root) and pass `CROSS_ROOT=.toolchain/root`. The script refuses to build a
 package whose binary does not match the architecture it claims.
