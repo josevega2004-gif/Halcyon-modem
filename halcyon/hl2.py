@@ -254,7 +254,13 @@ class HermesLite:
         self._tx_done = threading.Event()
         self._tx_done.set()
 
-        self._rx = np.zeros(0, dtype=np.complex64)
+        # Receive ring: fixed capacity, so a packet costs a memcpy instead of
+        # rebuilding the whole buffer.  The old code concatenated a six-second
+        # history onto itself for every packet, which capped the receive thread
+        # well below the radio's rate at 96 kHz and above.
+        self._rx_buf = np.zeros(0, dtype=np.complex64)
+        self._rx_w = 0
+        self._rx_n = 0
         self._rx_lock = threading.Lock()
         self.rx_frames = 0
         self.tx_frames = 0
@@ -385,7 +391,6 @@ class HermesLite:
                 time.sleep(0.05)
 
     def _run_rx(self) -> None:
-        keep = int(self.rate * 6)  # six seconds of ring buffer
         while not self._stop.is_set():
             try:
                 pkt = self._sock.recv(2048)
@@ -396,26 +401,64 @@ class HermesLite:
                 break
             iq = parse_iq(pkt, self.receivers)
             if iq.size:
-                with self._rx_lock:
-                    self._rx = np.concatenate([self._rx, iq])[-keep:]
+                self._rx_append(iq)
                 self.rx_frames += 1
 
     # -- data paths --------------------------------------------------------
+    def _rx_reset(self) -> None:
+        """Empty the ring, sized for the current rate.  Caller holds _rx_lock."""
+        cap = max(1, int(self.rate * 6))  # six seconds of receive history
+        if self._rx_buf.size != cap:
+            self._rx_buf = np.zeros(cap, dtype=np.complex64)
+        self._rx_w = 0
+        self._rx_n = 0
+
+    def _rx_append(self, iq: np.ndarray) -> None:
+        """Write one packet into the ring, overwriting the oldest samples."""
+        with self._rx_lock:
+            if self._rx_buf.size != max(1, int(self.rate * 6)):
+                self._rx_reset()
+            cap = self._rx_buf.size
+            if iq.size >= cap:
+                self._rx_buf[:] = iq[-cap:]
+                self._rx_w = 0
+                self._rx_n = cap
+                return
+            end = self._rx_w + iq.size
+            if end <= cap:
+                self._rx_buf[self._rx_w : end] = iq
+            else:
+                first = cap - self._rx_w
+                self._rx_buf[self._rx_w :] = iq[:first]
+                self._rx_buf[: iq.size - first] = iq[first:]
+            self._rx_w = end % cap
+            self._rx_n = min(cap, self._rx_n + iq.size)
+
+    def _rx_take(self, n: int) -> np.ndarray:
+        """The newest `n` samples, oldest first.  Caller holds _rx_lock."""
+        if self._rx_n <= 0 or n <= 0:
+            return np.zeros(0, dtype=np.complex64)
+        n = min(int(n), self._rx_n)
+        start = (self._rx_w - n) % self._rx_buf.size
+        if start + n <= self._rx_buf.size:
+            return self._rx_buf[start : start + n].copy()
+        first = self._rx_buf.size - start
+        return np.concatenate([self._rx_buf[start:], self._rx_buf[: n - first]])
+
     def recent(self, seconds: float = 0.25) -> np.ndarray:
         with self._rx_lock:
-            n = int(self.rate * seconds)
-            return self._rx[-n:].copy() if self._rx.size else np.zeros(0, dtype=np.complex64)
+            return self._rx_take(int(self.rate * seconds))
 
     def capture(self, seconds: float = 1.0, timeout: float = 3.0) -> np.ndarray:
         """Wait for `seconds` of fresh receive IQ (as much as arrives)."""
         want = int(self.rate * seconds)
         end = time.time() + max(timeout, seconds * 2.0 + 1.0)
         with self._rx_lock:
-            self._rx = np.zeros(0, dtype=np.complex64)
+            self._rx_reset()
         while time.time() < end:
             with self._rx_lock:
-                if self._rx.size >= want:
-                    return self._rx[-want:].copy()
+                if self._rx_n >= want:
+                    return self._rx_take(want)
             time.sleep(0.01)
         return self.recent(seconds)
 
