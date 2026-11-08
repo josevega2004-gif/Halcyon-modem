@@ -35,6 +35,16 @@ python -m halcyon.ui --port 8730
 Then open <http://127.0.0.1:8730/>.  One stdlib process serves two static pages
 and a small JSON API; it binds loopback, and nothing leaves the machine.
 
+In the source tree, `tools/halcyon-console.sh` does that and a little more: it
+starts the console only if the port is free, asks it to bring the host service
+up through `/api/services/start` (so the Services panel shows it and can stop it
+again), and opens the page.  Running it twice is harmless -- an existing console
+or host is reused rather than restarted.  `HALCYON_PORT`, `HALCYON_CMD_PORT`,
+`HALCYON_DATA_PORT`, `HALCYON_MYCALL` and `HALCYON_BANDWIDTH` override the
+defaults, and it logs to `$XDG_STATE_HOME/halcyon/console.log`.  It is a
+convenience for a checkout, not part of the package; the installed console is
+`halcyon` (see `packaging/README.md`).
+
 The root page is a terminal in the shape an HF operator expects: a live
 waterfall across the dial, a speed-level ladder down the side, an S-meter, and a
 message box whose bursts go out through the simulated channel and come back as
