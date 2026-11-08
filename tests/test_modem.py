@@ -239,3 +239,22 @@ def test_soft_combining_sums_prior_llrs():
     again = modem.receive(rx, prior=zeros)
     assert again.blocks_ok.all()
     assert again.payload == data
+
+
+def test_a_header_claiming_more_blocks_than_the_format_allows_is_refused(monkeypatch):
+    """`blocks` is a 6-bit field, so a sender could claim 63; the format allows
+    12, and decoding against a claim no sender may make is work for nothing."""
+    from halcyon import modem as modem_module
+    from halcyon.frame import MAX_BLOCKS
+    from halcyon.modem import Modem
+    from halcyon.ofdm import Phy
+
+    m = Modem(Phy())
+    tx, _ = m.build(b"cq de halcyon", 4, seq=1)
+    real = modem_module.unpack_header
+    monkeypatch.setattr(
+        modem_module,
+        "unpack_header",
+        lambda bits: {**real(bits), "blocks": MAX_BLOCKS + 1},
+    )
+    assert not m.receive(tx).header_ok

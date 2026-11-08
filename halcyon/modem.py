@@ -301,7 +301,14 @@ class Modem:
             ):
                 continue
             cand = unpack_header(body[:HEADER_PAYLOAD_BITS])
-            if cand["version"] != 2 or cand["mcs"] >= len(table_for(self.phy)):
+            # `blocks` is a 6-bit field, so a sender could claim up to 63 while
+            # the format allows MAX_BLOCKS; decoding against a claim no sender is
+            # allowed to make is work spent on a frame that cannot be genuine.
+            if (
+                cand["version"] != 2
+                or cand["mcs"] >= len(table_for(self.phy))
+                or cand["blocks"] > MAX_BLOCKS
+            ):
                 continue
             hdr = cand
             break
