@@ -32,6 +32,7 @@ import struct
 import threading
 import time
 from collections import deque
+from fractions import Fraction
 
 import numpy as np
 
@@ -114,6 +115,29 @@ def build_frame(samples: np.ndarray, rate: int = 48_000, stream: int = STREAM_TX
     header = HEADER.pack(receiver, int(rate), FMT_FLOAT32, 0, 0, int(flat.size),
                          int(stream), int(channels), 0, 0, 0, 0, 0, 0, 0, 0)
     return header + flat.tobytes()
+
+
+def resample(audio: np.ndarray, rate_in: float, rate_out: float) -> np.ndarray:
+    """Rate-convert TX audio, filtering before decimating.
+
+    The server plays what it is sent, so an unfiltered decimation would fold
+    the audio band's images back into it; scipy is a declared dependency, and
+    the linear path is only a fallback for a partial install.
+    """
+    if not rate_in or not rate_out or int(round(rate_in)) == int(round(rate_out)):
+        return audio
+    if int(round(rate_in)) <= 0 or int(round(rate_out)) <= 0:
+        return audio
+    ratio = Fraction(int(round(rate_out)), int(round(rate_in))).limit_denominator(2000)
+    try:
+        from scipy.signal import resample_poly
+
+        return resample_poly(audio, ratio.numerator, ratio.denominator).astype(np.float32)
+    except ImportError:  # pragma: no cover - scipy is a declared dependency
+        n = max(2, int(round(audio.size * float(ratio.numerator) / ratio.denominator)))
+        src = np.linspace(0.0, 1.0, audio.size, endpoint=False)
+        dst = np.linspace(0.0, 1.0, n, endpoint=False)
+        return np.interp(dst, src, audio).astype(np.float32)
 
 
 def mono(samples: np.ndarray, channels: int) -> np.ndarray:
@@ -204,10 +228,13 @@ class TciClient:
         if ws is None:
             return
         line = cmd if cmd.endswith(";") else cmd + ";"
-        try:
-            ws.send(line)
-        except Exception as exc:
-            self.error = str(exc)
+        # One writer at a time: the TX thread streams binary frames into the same
+        # websocket, and a websocket client is not safe to write from two threads.
+        with self._tx_lock:
+            try:
+                ws.send(line)
+            except Exception as exc:
+                self.error = str(exc)
 
     def set_vfo(self, hz: float) -> None:
         self.vfo_hz = int(hz)
@@ -310,10 +337,7 @@ class TciClient:
         if audio.size == 0:
             return 0.0
         if rate and int(rate) != self.audio_rate:
-            n = int(round(audio.size * self.audio_rate / float(rate)))
-            src = np.linspace(0.0, 1.0, audio.size, endpoint=False)
-            dst = np.linspace(0.0, 1.0, n, endpoint=False)
-            audio = np.interp(dst, src, audio).astype(np.float32)
+            audio = resample(audio, float(rate), float(self.audio_rate))
         peak = float(np.max(np.abs(audio))) or 1.0
         audio = (audio / peak * 0.6).astype(np.float32)  # TCI servers drop quiet TX
         airtime = audio.size / float(self.audio_rate)
