@@ -282,3 +282,76 @@ def test_a_command_that_never_answers_closes_the_session(fake):
         assert not rig.connected, "a half-read reply must not be reused"
     finally:
         rig.close()
+
+
+class SlowRig(threading.Thread):
+    """A rigctld that accepts one connection and hangs up before answering.
+
+    That is the startup race seen with a real rigctld: the port is open a moment
+    before the daemon is ready, so the first command gets no reply.
+    """
+
+    def __init__(self) -> None:
+        super().__init__(daemon=True)
+        self.sock = socket.socket()
+        self.sock.bind(("127.0.0.1", 0))
+        self.sock.listen(2)
+        self.port = self.sock.getsockname()[1]
+        self.freq = 7_074_000
+        self._stop = threading.Event()
+
+    def run(self) -> None:
+        try:
+            first, _ = self.sock.accept()
+        except OSError:
+            return
+        try:
+            first.recv(64)  # read a command, answer nothing, hang up
+        except OSError:
+            pass
+        first.close()
+        try:
+            conn, _ = self.sock.accept()
+        except OSError:
+            return
+        conn.settimeout(0.5)
+        buf = b""
+        while not self._stop.is_set():
+            try:
+                chunk = conn.recv(1024)
+            except (socket.timeout, OSError):
+                continue
+            if not chunk:
+                break
+            buf += chunk
+            while b"\n" in buf:
+                line, buf = buf.split(b"\n", 1)
+                cmd = line.decode().strip()
+                if cmd.startswith("\\chk_vfo"):
+                    conn.sendall(b"CHKVFO 0\n")
+                elif cmd == "f":
+                    conn.sendall(f"{self.freq}\n".encode())
+                else:
+                    conn.sendall(b"RPRT 0\n")
+        conn.close()
+
+    def stop(self) -> None:
+        self._stop.set()
+        try:
+            self.sock.close()
+        except OSError:
+            pass
+
+
+def test_a_rigctld_that_drops_the_probe_leaves_a_usable_session():
+    srv = SlowRig()
+    srv.start()
+    try:
+        rig = Rigctld(port=srv.port, timeout=0.5).open()
+        try:
+            assert rig.connected, "the optional probe must not cost the session"
+            assert rig.get_freq() == 7_074_000
+        finally:
+            rig.close()
+    finally:
+        srv.stop()

@@ -92,7 +92,7 @@ class Rigctld:
         self.strength: float | None = None
 
     # -- lifecycle ---------------------------------------------------------
-    def open(self) -> "Rigctld":
+    def _connect(self) -> None:
         try:
             sock = socket.create_connection((self.host, self.port), timeout=self.timeout)
         except OSError as exc:
@@ -102,11 +102,20 @@ class Rigctld:
         sock.settimeout(self.timeout)
         self._sock = sock
         self._buf = b""
+
+    def open(self) -> "Rigctld":
+        self._connect()
         try:
             reply = self.command("\\chk_vfo")
             self.vfo_mode = reply[0] if reply else ""
         except RigError:
+            # `\chk_vfo` only feeds the display, but a failed command closes the
+            # session, and a rigctld that accepted the port before it was ready
+            # would otherwise be reported as disconnected by its own probe: one
+            # more connection, then carry on.
             self.vfo_mode = ""
+            if not self.connected:
+                self._connect()
         return self
 
     def close(self) -> None:
