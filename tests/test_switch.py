@@ -183,3 +183,48 @@ def test_transport_file_is_private(tmp_path):
     switch.apply_transport(cfg, switch.TRANSPORT, switch.halcyon_block())
 
     assert cfg.stat().st_mode & 0o077 == 0
+
+
+def test_a_pid_that_cannot_be_inspected_is_not_called_a_host(monkeypatch):
+    """Failing closed: the caller may signal this pid, so an unreadable cmdline
+    is not evidence that the process is ours."""
+
+    def denied(self, *args, **kwargs):
+        raise PermissionError(13, "denied")
+
+    monkeypatch.setattr(switch.Path, "read_bytes", denied)
+    assert switch.is_host_process(os.getpid()) is False
+
+
+def test_this_process_is_not_mistaken_for_the_host():
+    assert switch.is_host_process(os.getpid()) is False
+
+
+def test_on_derives_the_pat_address_from_the_command_port(tmp_path):
+    cfg = write_config(tmp_path, {})
+
+    assert switch.main(
+        ["--config", str(cfg), "on", "--no-host",
+         "--cmd-port", "18300", "--data-port", "18301"]
+    ) == 0
+    assert read_config(cfg)["varahf"]["addr"] == "127.0.0.1:18300"
+
+
+def test_on_refuses_a_data_port_pat_cannot_reach(tmp_path):
+    """PAT dials the data port at the command port plus one."""
+    cfg = write_config(tmp_path, {})
+
+    with pytest.raises(SystemExit):
+        switch.main(["--config", str(cfg), "on", "--no-host", "--cmd-port", "18300"])
+    assert read_config(cfg) == {}
+
+
+def test_on_refuses_an_addr_that_disagrees_with_the_command_port(tmp_path):
+    cfg = write_config(tmp_path, {})
+
+    with pytest.raises(SystemExit):
+        switch.main(
+            ["--config", str(cfg), "on", "--no-host", "--cmd-port", "18300",
+             "--data-port", "18301", "--addr", "127.0.0.1:8300"]
+        )
+    assert read_config(cfg) == {}

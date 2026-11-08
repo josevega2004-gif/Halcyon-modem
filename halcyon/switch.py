@@ -235,14 +235,16 @@ def running_pid() -> int | None:
 
 
 def is_host_process(pid: int) -> bool:
+    """True only when the pid is provably a Halcyon host.
+
+    Failing closed matters: the caller may signal this pid, and a pid that
+    merely exists is not evidence that it is still the process the last run
+    wrote down -- numbers get reused.
+    """
     try:
         cmdline = Path(f"/proc/{pid}/cmdline").read_bytes()
     except OSError:
-        try:
-            os.kill(pid, 0)
-        except OSError:
-            return False
-        return True
+        return False
     return b"halcyon.host" in cmdline or b"halcyon-host" in cmdline
 
 
@@ -360,7 +362,24 @@ def cmd_status(args) -> int:
 
 def cmd_on(args) -> int:
     cfg = Path(args.config)
-    settings = halcyon_block(args.addr, args.bandwidth)
+    cmd_port = int(args.cmd_port)
+    data_port = int(args.data_port)
+    # PAT hardwires the data port to the command port plus one, so a pair that
+    # does not match would leave PAT dialling a port nothing listens on.
+    if data_port != cmd_port + 1:
+        raise SystemExit(
+            f"PAT opens the data port at the command port + 1; "
+            f"use --data-port {cmd_port + 1} with --cmd-port {cmd_port}"
+        )
+    # The address PAT is given is the one it will dial, so it follows the port
+    # the host is actually started on unless the operator set it explicitly.
+    addr = args.addr or f"{args.host}:{cmd_port}"
+    if addr_parts(addr)[1] != cmd_port:
+        raise SystemExit(
+            f"--addr {addr} and --cmd-port {cmd_port} disagree: "
+            f"PAT dials the port written in addr"
+        )
+    settings = halcyon_block(addr, args.bandwidth)
     existing = read_json(cfg)
     apply_transport(cfg, TRANSPORT, settings, dry_run=args.dry_run)
     if args.dry_run:
@@ -373,9 +392,18 @@ def cmd_on(args) -> int:
     if args.no_host:
         return 0
     if args.dry_run:
-        print("would start the host service on " + str(args.addr))
+        print(f"would start the host service on {args.host}:{cmd_port}")
         return 0
-    print("Host: " + start_host(mycall=args.mycall, bandwidth=args.bandwidth, host=args.host, cmd_port=args.cmd_port))
+    print(
+        "Host: "
+        + start_host(
+            mycall=args.mycall,
+            bandwidth=args.bandwidth,
+            host=args.host,
+            cmd_port=cmd_port,
+            data_port=data_port,
+        )
+    )
     print(f"Next: pat connect {TRANSPORT}:///CALL")
     return 0
 
@@ -489,12 +517,15 @@ def build_parser() -> argparse.ArgumentParser:
     on.add_argument("--mycall", default="N0CALL", help="station callsign reported to PAT")
     on.add_argument("--bandwidth", default=DEFAULT_BANDWIDTH, choices=["500", "2300", "2750"])
     on.add_argument(
-        "--addr", default=DEFAULT_ADDR,
-        help="address written for PAT; PAT itself dials 8300 (default: %(default)s)",
+        "--addr", default=None,
+        help="address written for PAT (default: --host:--cmd-port)",
     )
     on.add_argument("--host", default=HOST, help="address the host service binds")
     on.add_argument("--cmd-port", type=int, default=CMD_PORT)
-    on.add_argument("--data-port", type=int, default=DATA_PORT)
+    on.add_argument(
+        "--data-port", type=int, default=DATA_PORT,
+        help="data port; PAT dials the command port + 1",
+    )
     on.add_argument("--no-host", action="store_true", help="edit PAT only, start nothing")
     on.add_argument("--dry-run", action="store_true", help="show what would change")
     on.set_defaults(func=cmd_on)
