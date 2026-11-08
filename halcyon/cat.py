@@ -141,7 +141,16 @@ class Rigctld:
             if remaining <= 0:
                 raise TimeoutError
             self._sock.settimeout(remaining)
-            chunk = self._sock.recv(4096)
+            try:
+                chunk = self._sock.recv(4096)
+            except TimeoutError:
+                raise
+            except OSError as exc:
+                # A reset or broken pipe is a lost session, not a caller error:
+                # report it like any other lost connection so callers -- and the
+                # probe retry in `open` -- can treat it the same way.
+                self.close()
+                raise RigError(f"read from rigctld failed: {exc}") from exc
             if not chunk:
                 self.close()
                 raise RigError("rigctld closed the connection")

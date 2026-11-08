@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import socket
+import struct
 import threading
 
 import pytest
@@ -187,6 +188,83 @@ def test_no_session_reports_disconnected_rather_than_lying():
 def test_connecting_to_nothing_raises_with_an_actionable_message():
     with pytest.raises(RigError, match="could not reach rigctld"):
         Rigctld(port=9, timeout=0.2).open()
+
+
+class ResettingRig(threading.Thread):
+    """Resets the first connection, the way a rigctld still starting up can."""
+
+    def __init__(self) -> None:
+        super().__init__(daemon=True)
+        self.sock = socket.socket()
+        self.sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+        self.sock.bind(("127.0.0.1", 0))
+        self.sock.listen(4)
+        self.port = self.sock.getsockname()[1]
+        self.connections = 0
+
+    def run(self) -> None:
+        while True:
+            try:
+                conn, _ = self.sock.accept()
+            except OSError:
+                return
+            self.connections += 1
+            if self.connections == 1:
+                try:
+                    conn.recv(64)  # take the probe, then abort the stream
+                    conn.setsockopt(
+                        socket.SOL_SOCKET, socket.SO_LINGER, struct.pack("ii", 1, 0)
+                    )
+                except OSError:
+                    pass
+                conn.close()
+                continue
+            self._serve(conn)
+
+    def _serve(self, conn: socket.socket) -> None:
+        conn.settimeout(1.0)
+        buf = b""
+        while True:
+            try:
+                chunk = conn.recv(1024)
+            except (socket.timeout, OSError):
+                continue
+            if not chunk:
+                break
+            buf += chunk
+            while b"\n" in buf:
+                line, buf = buf.split(b"\n", 1)
+                cmd = line.decode().strip()
+                if cmd == "\\chk_vfo":
+                    conn.sendall(b"CHKVFO 0\n")
+                elif cmd == "f":
+                    conn.sendall(b"7074000\n")
+                else:
+                    conn.sendall(b"RPRT 0\n")
+        conn.close()
+
+    def stop(self) -> None:
+        try:
+            self.sock.close()
+        except OSError:
+            pass
+
+
+def test_a_reset_probe_reconnects_instead_of_failing_the_open():
+    """A rigctld that hangs up on the probe must not fail the whole connect."""
+    srv = ResettingRig()
+    srv.start()
+    try:
+        rig = Rigctld(port=srv.port, timeout=2.0).open()
+        try:
+            assert rig.connected is True
+            assert rig.vfo_mode == ""
+            assert rig.get_freq() == 7_074_000
+        finally:
+            rig.close()
+        assert srv.connections >= 2
+    finally:
+        srv.stop()
 
 
 def test_service_without_a_session_is_disconnected():
