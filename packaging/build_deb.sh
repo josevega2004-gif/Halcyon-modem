@@ -19,7 +19,7 @@ umask 022
 here=$(cd "$(dirname "$0")" && pwd)
 root=$(cd "$here/.." && pwd)
 out=${OUT:-"$root/dist"}
-maint=${MAINT:-"Halcyon Modem Project <halcyon@example.org>"}
+maint=${MAINT:-"Jose Vega <josevega2004@gmail.com>"}
 
 usage() {
     sed -n '2,8p' "$0" | sed 's/^# \{0,1\}//'

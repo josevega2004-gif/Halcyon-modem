@@ -53,8 +53,6 @@ The package is `GPL-3+`.  `packaging/copyright` carries the DEP-5 stanza and
 points at `/usr/share/common-licenses/GPL-3`, so the archive does not repeat the
 full text; `LICENSE` in the source tree has it for anyone reading the code.
 
-The maintainer address in `build_deb.sh` is still a placeholder
-(`halcyon@example.org` is a documentation domain, so mail to it goes nowhere).
-Set `MAINT="Your Name <you@example.org>"` or edit the default before handing the
-package to anyone: Debian policy wants a reachable maintainer, and the changelog
-trailer records whatever is used.
+The default maintainer in `build_deb.sh` is `Jose Vega <josevega2004@gmail.com>`.
+Override it with `MAINT="Your Name <you@example.org>"`; the changelog trailer
+records whatever is used.
